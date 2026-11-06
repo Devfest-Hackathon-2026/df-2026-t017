@@ -4,7 +4,7 @@ from app.models.schemas import ClothingItem, RawCalendarEvent, UserProfile, Weat
 def get_demo_wardrobe() -> list[ClothingItem]:
     """
     審査員が1クリックで『Clo値フィルタ』『雨天の靴制御』『死蔵衣類（30日以上未着用）の再発見』を
-    すべて体験できるよう設計されたリアルな手持ちクローゼットデータ（全12着）。
+    すべて体験できるよう設計されたリアルな手持ちクローゼットデータ（全12着・実写ビジュアル写真付）。
     """
     return [
         # Tops
@@ -18,6 +18,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             clo_value=0.25,
             wear_count=12,
             days_since_last_worn=4,
+            image_url="https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?auto=format&fit=crop&w=600&q=80",
             style_tags=["clean", "office", "smart-casual"],
         ),
         ClothingItem(
@@ -30,6 +31,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             clo_value=0.36,
             wear_count=2,
             days_since_last_worn=42,  # 死蔵衣類！
+            image_url="https://images.unsplash.com/photo-1576871337622-98d48d1cf531?auto=format&fit=crop&w=600&q=80",
             style_tags=["clean", "minimal", "warm"],
         ),
         ClothingItem(
@@ -42,6 +44,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             clo_value=0.34,
             wear_count=9,
             days_since_last_worn=2,
+            image_url="https://images.unsplash.com/photo-1556905055-8f358a7a47b2?auto=format&fit=crop&w=600&q=80",
             style_tags=["casual", "relaxed"],
         ),
         ClothingItem(
@@ -54,6 +57,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             clo_value=0.09,
             wear_count=18,
             days_since_last_worn=20,
+            image_url="https://images.unsplash.com/photo-1521572267360-ee0c2909d518?auto=format&fit=crop&w=600&q=80",
             style_tags=["casual", "minimal", "summer"],
         ),
         # Bottoms
@@ -67,6 +71,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             clo_value=0.24,
             wear_count=14,
             days_since_last_worn=3,
+            image_url="https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?auto=format&fit=crop&w=600&q=80",
             style_tags=["clean", "office", "minimal"],
         ),
         ClothingItem(
@@ -79,6 +84,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             clo_value=0.26,
             wear_count=11,
             days_since_last_worn=6,
+            image_url="https://images.unsplash.com/photo-1542272604-780c96856592?auto=format&fit=crop&w=600&q=80",
             style_tags=["casual", "clean"],
         ),
         ClothingItem(
@@ -91,6 +97,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             clo_value=0.23,
             wear_count=1,
             days_since_last_worn=38,  # 死蔵衣類！
+            image_url="https://images.unsplash.com/photo-1473966968600-fa801b869a1a?auto=format&fit=crop&w=600&q=80",
             style_tags=["smart-casual", "minimal"],
         ),
         # Outers
@@ -105,6 +112,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             water_resistant=True,
             wear_count=3,
             days_since_last_worn=35,  # 死蔵衣類！
+            image_url="https://images.unsplash.com/photo-1544923246-77307dd654cb?auto=format&fit=crop&w=600&q=80",
             style_tags=["clean", "office", "rain-ready"],
         ),
         ClothingItem(
@@ -118,6 +126,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             water_resistant=False,
             wear_count=6,
             days_since_last_worn=11,
+            image_url="https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=600&q=80",
             style_tags=["clean", "smart-casual"],
         ),
         ClothingItem(
@@ -131,6 +140,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             water_resistant=False,
             wear_count=1,
             days_since_last_worn=48,  # 死蔵衣類！
+            image_url="https://images.unsplash.com/photo-1434389677669-e08b4cac3105?auto=format&fit=crop&w=600&q=80",
             style_tags=["minimal", "clean", "layered"],
         ),
         # Shoes
@@ -145,6 +155,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             water_resistant=True,
             wear_count=8,
             days_since_last_worn=5,
+            image_url="https://images.unsplash.com/photo-1614252369475-531eba835eb1?auto=format&fit=crop&w=600&q=80",
             style_tags=["clean", "office", "rain-ready"],
         ),
         ClothingItem(
@@ -158,6 +169,7 @@ def get_demo_wardrobe() -> list[ClothingItem]:
             water_resistant=False,  # 雨の日はStage1で自動除外される！
             wear_count=15,
             days_since_last_worn=1,
+            image_url="https://images.unsplash.com/photo-1525966222134-fcfa99b8ae77?auto=format&fit=crop&w=600&q=80",
             style_tags=["casual", "minimal"],
         ),
     ]

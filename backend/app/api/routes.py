@@ -14,6 +14,7 @@ from app.models.schemas import (
     RecommendRequest,
     RecommendResponse,
     ScoreBreakdown,
+    WeatherSnapshot,
 )
 from app.services.demo_data import get_demo_presets, get_demo_wardrobe
 from app.services.gemini_service import analyze_clothing_image, rerank_and_explain_outfits
@@ -21,6 +22,7 @@ from app.services.vector_service import (
     compute_vector_and_dormancy_scores,
     generate_clothing_embedding,
 )
+from app.services.weather_service import get_weather_for_location
 
 router = APIRouter(prefix="/api/v1")
 
@@ -37,6 +39,12 @@ async def get_demo_context() -> dict:
         "wardrobe": [item.model_dump() for item in get_demo_wardrobe()],
         "presets": get_demo_presets(),
     }
+
+
+@router.get("/weather/lookup", response_model=WeatherSnapshot)
+async def lookup_weather(location: str = "東京") -> WeatherSnapshot:
+    """Google Maps Platform Weather API / フォールバック気象プロバイダから地域の気象データを取得。"""
+    return get_weather_for_location(location)
 
 
 @router.post("/wardrobe/analyze", response_model=AnalyzeClothingResponse)

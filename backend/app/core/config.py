@@ -24,6 +24,7 @@ class Settings(BaseModel):
     enable_vertex_ai: bool = os.getenv("ENABLE_VERTEX_AI", "false").lower() == "true"
     enable_firestore: bool = os.getenv("ENABLE_FIRESTORE", "false").lower() == "true"
     gemini_model_name: str = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
+    google_maps_api_key: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
     allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
 
     @property

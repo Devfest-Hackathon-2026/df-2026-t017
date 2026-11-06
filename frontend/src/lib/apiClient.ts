@@ -62,3 +62,13 @@ export async function analyzeClothingPhoto(
   }
   return res.json();
 }
+
+export async function lookupWeather(location: string): Promise<WeatherSnapshot> {
+  const res = await fetch(`${API_BASE}/weather/lookup?location=${encodeURIComponent(location)}`, {
+    headers: { "X-Demo-Mode": "true" },
+  });
+  if (!res.ok) {
+    throw new Error(`Weather lookup failed: ${res.status}`);
+  }
+  return res.json();
+}

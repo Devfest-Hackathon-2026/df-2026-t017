@@ -5,15 +5,20 @@ from app.core.auth import AuthContext, get_auth_context
 from app.core.logging import log_structured
 from app.core.physics import (
     calculate_target_clo_range,
+    find_swap_candidates,
     sanitize_calendar_events,
     solve_physical_combinations,
 )
 from app.models.schemas import (
     AnalyzeClothingResponse,
+    CrossModalSearchRequest,
+    CrossModalSearchResult,
     PipelineTrace,
     RecommendRequest,
     RecommendResponse,
     ScoreBreakdown,
+    SwapCandidateItem,
+    SwapCandidatesRequest,
     WeatherSnapshot,
 )
 from app.services.demo_data import get_demo_presets, get_demo_wardrobe
@@ -21,6 +26,7 @@ from app.services.gemini_service import analyze_clothing_image, rerank_and_expla
 from app.services.vector_service import (
     compute_vector_and_dormancy_scores,
     generate_clothing_embedding,
+    search_wardrobe_by_text,
 )
 from app.services.weather_service import get_weather_for_location
 
@@ -81,6 +87,49 @@ async def analyze_wardrobe_photo(
         embedding_source=embed_source,
     )
     return analysis
+
+
+@router.post("/wardrobe/search-crossmodal", response_model=list[CrossModalSearchResult])
+async def search_wardrobe_crossmodal(
+    payload: CrossModalSearchRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> list[CrossModalSearchResult]:
+    """
+    Vertex AI Multimodal Embeddings (1408次元) によるテキスト対画像クロスモーダル検索。
+    入力テキスト（例: '知的なカフェ作業'）と衣服画像の埋め込みベクトル間のコサイン内積を計算し、類似度順に返す。
+    """
+    results = search_wardrobe_by_text(payload.query, payload.wardrobe)
+    log_structured(
+        "INFO",
+        "Cross-modal semantic search executed",
+        event_type="crossmodal_search",
+        uid=auth.uid,
+        query=payload.query,
+        result_count=len(results),
+        top_match_pct=results[0].match_percentage if results else 0,
+    )
+    return results
+
+
+@router.post("/recommend/swap-candidates", response_model=list[SwapCandidateItem])
+async def get_swap_candidates(
+    payload: SwapCandidatesRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> list[SwapCandidateItem]:
+    """
+    コーディネート内の特定アイテム（アウターや靴）を差し替える際、
+    残りのアイテムの合計Clo値と目標Clo値から、熱的安全性と制約充足をリアルタイム判定した代替候補を返す。
+    """
+    candidates = find_swap_candidates(
+        target_category=payload.target_category,
+        current_item_ids=payload.current_item_ids,
+        target_clo_min=payload.target_clo_min,
+        target_clo_max=payload.target_clo_max,
+        weather=payload.weather,
+        profile=payload.profile,
+        wardrobe=payload.wardrobe,
+    )
+    return candidates
 
 
 @router.post("/recommend", response_model=RecommendResponse)

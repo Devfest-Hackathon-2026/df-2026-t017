@@ -1,9 +1,12 @@
 import {
   AnalyzeClothingResponse,
+  ClothingCategory,
   ClothingItem,
+  CrossModalSearchResult,
   DemoPreset,
   RawCalendarEvent,
   RecommendResponse,
+  SwapCandidateItem,
   UserProfile,
   WeatherSnapshot,
 } from "@/types/closet";
@@ -69,6 +72,47 @@ export async function lookupWeather(location: string): Promise<WeatherSnapshot> 
   });
   if (!res.ok) {
     throw new Error(`Weather lookup failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function searchWardrobeCrossModal(params: {
+  query: string;
+  wardrobe: ClothingItem[];
+}): Promise<CrossModalSearchResult[]> {
+  const res = await fetch(`${API_BASE}/wardrobe/search-crossmodal`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Demo-Mode": "true",
+    },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    throw new Error(`Crossmodal search failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function fetchSwapCandidates(params: {
+  target_category: ClothingCategory;
+  current_item_ids: string[];
+  target_clo_min: number;
+  target_clo_max: number;
+  weather: WeatherSnapshot;
+  profile: UserProfile;
+  wardrobe: ClothingItem[];
+}): Promise<SwapCandidateItem[]> {
+  const res = await fetch(`${API_BASE}/recommend/swap-candidates`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Demo-Mode": "true",
+    },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to fetch swap candidates: ${res.status}`);
   }
   return res.json();
 }

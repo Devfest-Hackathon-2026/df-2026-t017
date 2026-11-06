@@ -105,3 +105,19 @@ export interface AnalyzeClothingResponse {
   embedding_dimensions: number;
   analysis_source: string;
 }
+
+export interface CrossModalSearchResult {
+  item: ClothingItem;
+  similarity_score: number;
+  match_percentage: number;
+  matched_traits: string[];
+}
+
+export interface SwapCandidateItem {
+  item: ClothingItem;
+  is_currently_selected: boolean;
+  is_physically_safe: boolean;
+  new_total_clo: number;
+  predicted_tpo_fit: number;
+  is_revival: boolean;
+}

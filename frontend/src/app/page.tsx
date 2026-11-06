@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
+  ArrowLeftRight,
   Calendar,
   CalendarPlus,
   Check,
@@ -9,6 +10,7 @@ import {
   ChevronRight,
   Clock,
   CloudRain,
+  Compass,
   Cpu,
   Filter,
   Flame,
@@ -16,6 +18,7 @@ import {
   MapPin,
   Plus,
   RefreshCw,
+  Search,
   ShieldCheck,
   Shirt,
   Sparkles,
@@ -25,21 +28,26 @@ import {
   Upload,
   Wind,
   X,
+  Zap,
 } from "lucide-react";
 import {
   analyzeClothingPhoto,
   fetchDemoContext,
+  fetchSwapCandidates,
   lookupWeather,
   requestRecommendations,
+  searchWardrobeCrossModal,
 } from "@/lib/apiClient";
 import {
   AnalyzeClothingResponse,
   ClothingCategory,
   ClothingItem,
+  CrossModalSearchResult,
   DemoPreset,
   OutfitProposal,
   PipelineTrace,
   RawCalendarEvent,
+  SwapCandidateItem,
   UserProfile,
   WeatherSnapshot,
 } from "@/types/closet";
@@ -61,6 +69,10 @@ const POPULAR_CITIES = [
   "北海道・札幌",
   "宮城・仙台",
 ];
+
+function roundToTwo(val: number): number {
+  return Math.round(val * 100) / 100;
+}
 
 export default function ClosetMeApp() {
   const [activeTab, setActiveTab] = useState<"today" | "closet">("today");
@@ -106,6 +118,20 @@ export default function ClosetMeApp() {
 
   // 衣服詳細モーダル用State
   const [selectedItemDetail, setSelectedItemDetail] = useState<ClothingItem | null>(null);
+
+  // 【新機能1】Vertex AI クロスモーダル・テイスト検索State
+  const [crossModalQuery, setCrossModalQuery] = useState<string>("");
+  const [crossModalResults, setCrossModalResults] = useState<CrossModalSearchResult[] | null>(null);
+  const [searchingCrossModal, setSearchingCrossModal] = useState<boolean>(false);
+
+  // 【新機能2】被服気候学CSP連動アイテム部分入れ替え（Swap）State
+  const [swapModal, setSwapModal] = useState<{
+    outfitRank: number;
+    targetCategory: ClothingCategory;
+    currentItemIds: string[];
+    candidates: SwapCandidateItem[];
+  } | null>(null);
+  const [swapLoading, setSwapLoading] = useState<boolean>(false);
 
   const runRecommendation = useCallback(
     async (
@@ -232,6 +258,100 @@ export default function ClosetMeApp() {
     }
   };
 
+  // 【新機能1】Vertex AI クロスモーダル検索の実行
+  const handleCrossModalSearch = async (queryText: string) => {
+    if (!queryText.trim()) return;
+    setSearchingCrossModal(true);
+    setCrossModalQuery(queryText);
+    try {
+      const results = await searchWardrobeCrossModal({
+        query: queryText,
+        wardrobe,
+      });
+      setCrossModalResults(results);
+    } catch {
+      setErrorMsg("クロスモーダル検索に失敗しました。");
+    } finally {
+      setSearchingCrossModal(false);
+    }
+  };
+
+  const handleClearCrossModal = () => {
+    setCrossModalQuery("");
+    setCrossModalResults(null);
+  };
+
+  // 【新機能2】被服気候学CSP連動アイテム部分入れ替えモーダルを開く
+  const handleOpenSwapModal = async (
+    outfitRank: number,
+    targetCategory: ClothingCategory,
+    currentItemIds: string[]
+  ) => {
+    if (!weather || !trace) return;
+    setSwapLoading(true);
+    try {
+      const candidates = await fetchSwapCandidates({
+        target_category: targetCategory,
+        current_item_ids: currentItemIds,
+        target_clo_min: trace.target_clo_min,
+        target_clo_max: trace.target_clo_max,
+        weather,
+        profile,
+        wardrobe,
+      });
+      setSwapModal({
+        outfitRank,
+        targetCategory,
+        currentItemIds,
+        candidates,
+      });
+    } catch {
+      setErrorMsg("差し替え候補の算出に失敗しました。");
+    } finally {
+      setSwapLoading(false);
+    }
+  };
+
+  // 選択したアイテムで差し替え実行
+  const handleApplySwap = (newItem: ClothingItem) => {
+    if (!swapModal) return;
+
+    const targetOutfit = outfits.find((o) => o.rank === swapModal.outfitRank);
+    if (!targetOutfit) return;
+
+    // 既存のアイテム配列から同カテゴリのアイテムを差し替え
+    const newItems = targetOutfit.items.map((i) =>
+      i.category === swapModal.targetCategory ? newItem : i
+    );
+    // もし既存に該当カテゴリが無かった場合（例: アウターなしにアウター追加）
+    if (!targetOutfit.items.some((i) => i.category === swapModal.targetCategory)) {
+      newItems.push(newItem);
+    }
+
+    const newItemIds = newItems.map((i) => i.id);
+    const newTotalClo = roundToTwo(newItems.reduce((acc, i) => acc + i.clo_value, 0.06));
+
+    const revived = newItems
+      .filter((i) => i.days_since_last_worn >= 30)
+      .map((i) => i.id);
+
+    // 提案データを動的に更新
+    const updatedOutfits = outfits.map((o) => {
+      if (o.rank !== swapModal.outfitRank) return o;
+      return {
+        ...o,
+        item_ids: newItemIds,
+        items: newItems,
+        total_clo: newTotalClo,
+        revived_dormant_ids: revived,
+        reason: `${newItem.name} にカスタム差し替え。熱的断熱性 ${newTotalClo} Clo で快適性を維持。`,
+      };
+    });
+
+    setOutfits(updatedOutfits);
+    setSwapModal(null);
+  };
+
   const handleSensitivityChange = async (delta: number) => {
     if (!weather) return;
     const nextProfile: UserProfile = {
@@ -332,8 +452,25 @@ export default function ClosetMeApp() {
     return Math.round(((wardrobe.length - dormantCount) / wardrobe.length) * 100);
   }, [wardrobe, dormantCount]);
 
+  const crossModalMap = useMemo(() => {
+    if (!crossModalResults) return null;
+    const map = new Map<string, CrossModalSearchResult>();
+    for (const r of crossModalResults) {
+      map.set(r.item.id, r);
+    }
+    return map;
+  }, [crossModalResults]);
+
   const filteredWardrobe = useMemo(() => {
-    return wardrobe.filter((item) => {
+    let list = [...wardrobe];
+    // クロスモーダル検索結果がある場合は類似度降順に並べ替え
+    if (crossModalResults && crossModalResults.length > 0) {
+      const orderMap = new Map<string, number>();
+      crossModalResults.forEach((r, idx) => orderMap.set(r.item.id, idx));
+      list.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
+    }
+
+    return list.filter((item) => {
       if (selectedCategory !== "all" && item.category !== selectedCategory) {
         return false;
       }
@@ -342,7 +479,7 @@ export default function ClosetMeApp() {
       }
       return true;
     });
-  }, [wardrobe, selectedCategory, filterDormantOnly]);
+  }, [wardrobe, selectedCategory, filterDormantOnly, crossModalResults]);
 
   return (
     <div className="min-h-screen bg-[#FAF9F6] text-zinc-900 pb-20 font-sans selection:bg-zinc-900 selection:text-white">
@@ -790,14 +927,26 @@ export default function ClosetMeApp() {
                                   )}
                                 </div>
 
-                                <div className="p-2">
-                                  <p className="text-[11px] font-bold text-zinc-900 truncate">
-                                    {item.name}
-                                  </p>
-                                  <div className="flex items-center justify-between text-[10px] text-zinc-500 mt-0.5">
-                                    <span>{item.colors[0]}</span>
-                                    <span className="font-mono font-semibold">{item.clo_value} Clo</span>
+                                <div className="p-2 flex flex-col justify-between flex-1">
+                                  <div>
+                                    <p className="text-[11px] font-bold text-zinc-900 truncate">
+                                      {item.name}
+                                    </p>
+                                    <div className="flex items-center justify-between text-[10px] text-zinc-500 mt-0.5">
+                                      <span>{item.colors[0]}</span>
+                                      <span className="font-mono font-semibold">{item.clo_value} Clo</span>
+                                    </div>
                                   </div>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenSwapModal(outfit.rank, item.category, outfit.item_ids);
+                                    }}
+                                    className="mt-1.5 flex items-center justify-center gap-1 w-full rounded-md bg-zinc-100 hover:bg-zinc-900 hover:text-white px-1.5 py-0.8 text-[10px] font-bold text-zinc-700 transition"
+                                  >
+                                    <ArrowLeftRight className="h-3 w-3" />
+                                    <span>入れ替え</span>
+                                  </button>
                                 </div>
                               </div>
                             );
@@ -1011,6 +1160,90 @@ export default function ClosetMeApp() {
               )}
             </div>
 
+            {/* 【新機能1】Vertex AI クロスモーダル・テイスト検索カード */}
+            <div className="rounded-2xl border border-indigo-200/80 bg-gradient-to-r from-indigo-50/70 via-purple-50/40 to-white p-4 shadow-2xs space-y-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-xs">
+                    <Compass className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                      <span>Vertex AI クロスモーダル・テイスト検索</span>
+                      <span className="rounded bg-indigo-100 text-indigo-800 px-1.5 py-0.2 font-mono text-[9px]">
+                        multimodalembedding@001 (1408 dim)
+                      </span>
+                    </h3>
+                    <p className="text-[11px] text-zinc-500">
+                      自然言語の気分や場面を入力すると、手持ち服の画像ベクトルとの内積（類似度）を直接計算します
+                    </p>
+                  </div>
+                </div>
+
+                {crossModalResults && (
+                  <button
+                    onClick={handleClearCrossModal}
+                    className="self-start sm:self-center flex items-center gap-1 text-[11px] font-semibold text-zinc-500 hover:text-zinc-800 bg-white border border-zinc-200 px-2.5 py-1 rounded-lg"
+                  >
+                    <X className="h-3 w-3" />
+                    <span>検索解除（通常表示）</span>
+                  </button>
+                )}
+              </div>
+
+              {/* 検索入力欄 & クイックチップ */}
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
+                    <input
+                      type="text"
+                      placeholder="気分・テイスト・場面を入力（例: 知的なカフェ作業、雨の日のモードスタイル、清潔感のある休日...）"
+                      value={crossModalQuery}
+                      onChange={(e) => setCrossModalQuery(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleCrossModalSearch(crossModalQuery);
+                      }}
+                      className="w-full rounded-xl border border-indigo-200 bg-white pl-9 pr-3 py-2 text-xs text-zinc-900 focus:border-indigo-600 focus:outline-none shadow-xs"
+                    />
+                  </div>
+                  <button
+                    onClick={() => handleCrossModalSearch(crossModalQuery)}
+                    disabled={searchingCrossModal || !crossModalQuery.trim()}
+                    className="rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-4 py-2 text-xs font-bold text-white transition flex items-center gap-1.5 shrink-0"
+                  >
+                    {searchingCrossModal ? (
+                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Zap className="h-3.5 w-3.5" />
+                    )}
+                    <span>1408d ベクトル検索</span>
+                  </button>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-zinc-400 font-medium">クイック検索例:</span>
+                  {[
+                    "☕ 知的なカフェ作業",
+                    "🌧️ 雨の日のモード",
+                    "💼 きれいめオフィス",
+                    "🌿 休日のリラックス散歩",
+                  ].map((chip) => {
+                    const cleanText = chip.replace(/^[^\s]+\s*/, "");
+                    return (
+                      <button
+                        key={chip}
+                        onClick={() => handleCrossModalSearch(cleanText)}
+                        className="rounded-lg bg-white/90 border border-indigo-100 hover:border-indigo-300 px-2.5 py-1 text-[11px] text-indigo-900 transition shadow-2xs"
+                      >
+                        {chip}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
             {/* Wardrobe Controls & Grid */}
             <div className="space-y-4">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -1064,12 +1297,15 @@ export default function ClosetMeApp() {
                 {filteredWardrobe.map((item) => {
                   const isDormant = item.days_since_last_worn >= 30;
                   const isLaundry = item.availability === "laundry";
+                  const cmResult = crossModalMap?.get(item.id);
                   return (
                     <div
                       key={item.id}
                       className={`group rounded-2xl border bg-white overflow-hidden transition-all duration-200 shadow-2xs ${
                         isLaundry
                           ? "opacity-55 border-zinc-200"
+                          : cmResult && cmResult.match_percentage >= 85
+                          ? "border-indigo-400 ring-2 ring-indigo-400/20 shadow-md"
                           : isDormant
                           ? "border-amber-300 ring-1 ring-amber-300/40"
                           : "border-zinc-200 hover:border-zinc-300"
@@ -1095,7 +1331,13 @@ export default function ClosetMeApp() {
                         <span className="absolute top-2 left-2 rounded-md bg-black/60 backdrop-blur-xs px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
                           {CATEGORY_LABELS[item.category]}
                         </span>
-                        {isDormant && (
+                        {cmResult && (
+                          <span className="absolute top-2 right-2 rounded-md bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-xs flex items-center gap-1">
+                            <Zap className="h-3 w-3" />
+                            <span>Match {cmResult.match_percentage}%</span>
+                          </span>
+                        )}
+                        {!cmResult && isDormant && (
                           <span className="absolute top-2 right-2 rounded-md bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-white shadow-xs flex items-center gap-1">
                             <Flame className="h-3 w-3" />
                             <span>{item.days_since_last_worn}日未着用</span>
@@ -1118,6 +1360,13 @@ export default function ClosetMeApp() {
                             {item.clo_value} Clo
                           </span>
                         </div>
+
+                        {cmResult && cmResult.matched_traits.length > 0 && (
+                          <div className="flex items-center gap-1 text-[10px] text-indigo-700 bg-indigo-50 px-2 py-1 rounded-md">
+                            <span className="font-semibold">マッチ特性:</span>
+                            <span className="truncate">{cmResult.matched_traits.join("・")}</span>
+                          </div>
+                        )}
 
                         <div className="flex flex-wrap gap-1 text-[11px] text-zinc-600">
                           <span className="rounded bg-zinc-100 px-1.5 py-0.5">
@@ -1150,6 +1399,155 @@ export default function ClosetMeApp() {
               </div>
             </div>
           </section>
+        )}
+
+        {/* 【新機能2】被服気候学CSP連動アイテム部分入れ替えモーダル */}
+        {swapModal && (
+          <div
+            onClick={() => setSwapModal(null)}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl space-y-4 max-h-[90vh] flex flex-col"
+            >
+              <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
+                <div>
+                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                    Option 0{swapModal.outfitRank} のアイテム入れ替え
+                  </span>
+                  <h3 className="text-base font-bold text-zinc-900 flex items-center gap-2">
+                    <span>{CATEGORY_LABELS[swapModal.targetCategory]} の差し替え候補</span>
+                    {trace && (
+                      <span className="rounded-full bg-zinc-100 text-zinc-700 px-2 py-0.5 text-[10px] font-mono">
+                        目標: {trace.target_clo_min}〜{trace.target_clo_max} Clo
+                      </span>
+                    )}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setSwapModal(null)}
+                  className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="text-xs text-zinc-500">
+                被服気候学の数理制約（目標断熱性・雨天靴）を崩さずに着回せる手持ち服の一覧です。
+              </div>
+
+              {swapLoading ? (
+                <div className="py-12 flex flex-col items-center justify-center text-zinc-400 text-xs gap-2">
+                  <RefreshCw className="h-5 w-5 animate-spin" />
+                  <span>CSP 物理制約を計算中...</span>
+                </div>
+              ) : (
+                <div className="space-y-2.5 overflow-y-auto pr-1 flex-1">
+                  {swapModal.candidates.map((cand) => (
+                    <div
+                      key={cand.item.id}
+                      className={`flex items-center justify-between p-3 rounded-xl border transition ${
+                        cand.is_currently_selected
+                          ? "border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900/10"
+                          : cand.is_physically_safe
+                          ? "border-emerald-200 bg-emerald-50/30 hover:border-emerald-400"
+                          : "border-zinc-200 bg-zinc-50/50 opacity-60"
+                      }`}
+                    >
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="h-14 w-14 rounded-lg overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
+                          {cand.item.image_url ? (
+                            <img
+                              src={cand.item.image_url}
+                              alt={cand.item.name}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center text-zinc-300">
+                              <Shirt className="h-6 w-6" />
+                            </div>
+                          )}
+                        </div>
+
+                        <div className="min-w-0">
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="font-bold text-xs text-zinc-900 truncate">
+                              {cand.item.name}
+                            </span>
+                            {cand.is_currently_selected && (
+                              <span className="rounded bg-zinc-900 text-white px-1.5 py-0.2 text-[9px] font-bold">
+                                選択中
+                              </span>
+                            )}
+                            {cand.is_revival && (
+                              <span className="rounded bg-amber-500 text-white px-1.5 py-0.2 text-[9px] font-bold flex items-center gap-0.5">
+                                <Flame className="h-2.5 w-2.5" />
+                                <span>Revival</span>
+                              </span>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 text-[10px] text-zinc-500 mt-1">
+                            <span>{cand.item.colors.join("・")}</span>
+                            <span>•</span>
+                            <span className="font-mono font-semibold">単体 {cand.item.clo_value} Clo</span>
+                            <span>•</span>
+                            <span
+                              className={`font-mono font-bold ${
+                                cand.is_physically_safe ? "text-emerald-700" : "text-amber-700"
+                              }`}
+                            >
+                              合計 {cand.new_total_clo} Clo
+                            </span>
+                          </div>
+
+                          <div className="mt-1">
+                            {cand.is_physically_safe ? (
+                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700">
+                                <CheckCircle2 className="h-3 w-3" />
+                                <span>熱的適正（目標断熱性を完全充足）</span>
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-medium text-amber-700">
+                                ⚠️ 今日の気温に対し断熱性が外れます
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="shrink-0 ml-2">
+                        {cand.is_currently_selected ? (
+                          <span className="text-xs font-bold text-zinc-400">現在採用中</span>
+                        ) : (
+                          <button
+                            onClick={() => handleApplySwap(cand.item)}
+                            className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
+                              cand.is_physically_safe
+                                ? "bg-zinc-900 text-white hover:bg-zinc-800"
+                                : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300"
+                            }`}
+                          >
+                            変更する
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div className="flex justify-end pt-2 border-t border-zinc-100">
+                <button
+                  onClick={() => setSwapModal(null)}
+                  className="rounded-xl px-4 py-2 text-xs font-semibold text-zinc-600 hover:bg-zinc-100"
+                >
+                  閉じる
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {/* 衣服詳細モーダル */}

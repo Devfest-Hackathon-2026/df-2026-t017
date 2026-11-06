@@ -115,3 +115,34 @@ class AnalyzeClothingResponse(BaseModel):
     style_tags: list[str]
     embedding_dimensions: int
     analysis_source: str
+
+
+class CrossModalSearchRequest(BaseModel):
+    query: str
+    wardrobe: list[ClothingItem]
+
+
+class CrossModalSearchResult(BaseModel):
+    item: ClothingItem
+    similarity_score: float
+    match_percentage: int
+    matched_traits: list[str] = Field(default_factory=list)
+
+
+class SwapCandidatesRequest(BaseModel):
+    target_category: ClothingCategory
+    current_item_ids: list[str]
+    target_clo_min: float
+    target_clo_max: float
+    weather: WeatherSnapshot
+    profile: UserProfile = Field(default_factory=UserProfile)
+    wardrobe: list[ClothingItem]
+
+
+class SwapCandidateItem(BaseModel):
+    item: ClothingItem
+    is_currently_selected: bool
+    is_physically_safe: bool
+    new_total_clo: float
+    predicted_tpo_fit: float
+    is_revival: bool

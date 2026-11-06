@@ -2,9 +2,11 @@ from dataclasses import dataclass
 from itertools import product
 
 from app.models.schemas import (
+    ClothingCategory,
     ClothingItem,
     RawCalendarEvent,
     SanitizedActivity,
+    SwapCandidateItem,
     UserProfile,
     WeatherSnapshot,
 )
@@ -205,3 +207,80 @@ def solve_physical_combinations(
 
     passed.sort(key=lambda c: c.physics_clo_fit, reverse=True)
     return passed, explored_count
+
+
+def find_swap_candidates(
+    target_category: ClothingCategory,
+    current_item_ids: list[str],
+    target_clo_min: float,
+    target_clo_max: float,
+    weather: WeatherSnapshot,
+    profile: UserProfile,
+    wardrobe: list[ClothingItem],
+) -> list[SwapCandidateItem]:
+    """
+    ユーザーがコーディネート内の特定のアイテム（例: 靴やアウター）を差し替えたいとき、
+    残りの服の固定Clo値と目標Clo値レンジから、
+    1) 熱的安全性（目標Clo値を充足するか）
+    2) 雨天撥水制約
+    3) 洗濯中・NG除外
+    を即時に数理判定（CSP）し、リアルタイム差し替え候補一覧を返す。
+    """
+    id_to_item = {i.id: i for i in wardrobe}
+    current_items = [id_to_item[i_id] for i_id in current_item_ids if i_id in id_to_item]
+
+    # 今回入れ替える対象カテゴリ以外のアイテムのClo値合計
+    kept_items = [i for i in current_items if i.category != target_category]
+    fixed_clo = sum(i.clo_value for i in kept_items) + 0.06  # 境界層空気層加算
+
+    banned = set(profile.banned_item_ids)
+    is_rainy = weather.rain_probability >= 0.50
+
+    pool = [
+        item
+        for item in wardrobe
+        if item.category == target_category and item.availability == "available" and item.id not in banned
+    ]
+
+    candidates: list[SwapCandidateItem] = []
+    for item in pool:
+        new_total_clo = round(fixed_clo + item.clo_value, 2)
+        # 物理的安全条件: 目標Clo値内に収まるか
+        is_clo_safe = target_clo_min <= new_total_clo <= target_clo_max
+
+        # 雨天時の靴制約
+        if is_rainy and target_category == "shoes" and not item.water_resistant:
+            is_rain_safe = False
+        else:
+            is_rain_safe = True
+
+        is_physically_safe = is_clo_safe and is_rain_safe
+
+        # 現在選択されているか
+        is_selected = item.id in current_item_ids
+
+        # 簡易TPO予測（フォーマル度）
+        avg_formality = sum(i.formality for i in kept_items + [item]) / max(1, len(kept_items) + 1)
+        predicted_tpo = round(min(1.0, max(0.4, 1.0 - abs(avg_formality - 3.5) * 0.2)), 2)
+
+        candidates.append(
+            SwapCandidateItem(
+                item=item,
+                is_currently_selected=is_selected,
+                is_physically_safe=is_physically_safe,
+                new_total_clo=new_total_clo,
+                predicted_tpo_fit=predicted_tpo,
+                is_revival=item.days_since_last_worn >= 30,
+            )
+        )
+
+    # 物理安全かつ死蔵ブースト/TPOの高い順にソート
+    candidates.sort(
+        key=lambda c: (
+            1 if c.is_physically_safe else 0,
+            1 if c.is_revival else 0,
+            c.predicted_tpo_fit,
+        ),
+        reverse=True,
+    )
+    return candidates

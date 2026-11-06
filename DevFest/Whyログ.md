@@ -25,3 +25,46 @@
   - 自分自身が使うイメージが湧かない。当事者が使わないプロダクトは、ピッチの実体験としても弱くなる
   - シミュレーションや予測の正確性が曖昧で、ユーザーの納得感が薄くなるリスクがある。「効果が有効か」を検証する物差しを持てない
 - 対比: まなびWhy は、ステップを最後まで進められたか・本人が「なぜ」を説明できるかで効果を検証できる。この差が決め手になった
+
+## #4 アーキテクチャ分離と被服気候学（Clo値）数理モデルの導入（2026-11-05）
+- 候補:
+  - 案A: Next.js 単体（Server Actions / Route HandlersでGemini APIを直接呼ぶ）
+  - 案B: Frontend（Next.js / App Hosting）＋ AI推薦エンジン（FastAPI / Cloud Run）の分離 ＋ 被服気候学（Clo値）× Gemini 2段階ハイブリッド
+- **決定: 案Bを採用**
+- 理由（技術選定のWhy）:
+  1. **大会テーマ「Own the Why」の体現**:
+     - LLMへのプロンプト丸投げは、気温に対して寒暖の破綻（10℃で半袖など）を起こす確率的ハルシネーションを排除できない。
+     - 被服気候学の国際指標「Clo値（衣服の断熱性）」と代謝量（METs）に基づく数理モデルを導入し、**「環境適応（物理的安全性）は決定論的数理アルゴリズムで保証し、TPOや好みの感性理解はGeminiに委ねる」**という明確な役割分担を実現した。
+  2. **ドメインの関心の分離**:
+     - 洗練されたユーザー体験・高速な画面遷移を担うUI層（Next.js）と、重い探索計算・外部APIアグリゲーション・AI推論を担うコア層（FastAPI on Cloud Run）を分離し、保守性とスケーラビリティを確保。
+  3. **Google Cloudエコシステムの最大活用**:
+     - Firebase App Hosting（Webアプリ実行）× Cloud Run（コンテナ基盤）× Gemini 1.5 Flash（構造化リランキング）× Cloud Firestore という、Google Cloudのエンタープライズ水準のベストプラクティスを5日間で実証する。
+
+## #5 プロダクト正式決定：Closet Me と課題定義・カテゴリー適合の昇華（2026-11-06）
+- 候補:
+  - 案A: 「毎朝の服選びの時短ツール」として訴求する Closet Me
+  - 案B: **「クローゼットの眠れる死蔵衣類を蘇らせる、制約の中のクリエイティブ支援基盤」**として再定義した Closet Me
+  - 案C: 教育「まなびWhy」への回帰
+- **決定: 案Bを採用（カテゴリー：クリエイティブ確定）**
+- 理由（課題設定のWhy）:
+  - 単なる「朝の時短」だけでは、審査基準「社会課題への解決力（6点）」において個人の軽い面倒ごとと見なされるリスクがあった。
+  - 環境省調査でも指摘される「日本の家庭における1人平均25〜30着の死蔵衣類（1年間未着用）」の原因が、「服の不足」ではなく**「手持ち服×天気×TPOの組み合わせ（着回し）を人間が想起しきれないこと」**にある点に着目。
+  - ECで新しい服を買わせるのではなく、**「既存の所有資産 × 環境制約 × 予定文脈」から自分では思いつかなかった着こなしを発見（クリエイティブ支援）し、クローゼット稼働率を高める**という定義に昇華させることで、「クリエイティブ部門への適合」と「社会課題の重み（サステナビリティ＋若者の多拠点TPO負荷軽減）」を同時に解決した。
+
+## #6 Google Cloud ネイティブ設計の深化（Vertex AI・Vector Search・IAMキーレス）（2026-11-06）
+- 候補:
+  - 案A: Google AI Studio の APIキー（`GEMINI_API_KEY`）を環境変数に置いて呼び出す構成
+  - 案B: **Vertex AI（IAMキーレス認証）＋ Multimodal Embeddings × Firestore Vector Search ＋ Secret Manager ＋ Cloud Logging** のフルGCPネイティブ構成
+  - 案C: GKE / Pub/Sub / BigQuery まで組み込む大規模構成
+- **決定: 案Bを採用**
+- 理由（技術選定のWhy）:
+  1. **ゼロAPIキー設計による安全性（Vertex AI + ADC）**:
+     - Cloud Run のサービスアカウント権限（IAM）で Vertex AI を直接呼び出すことで、LLM用APIキーの発行・管理自体を不要にし、キー漏洩リスクを原理的にゼロにした（大会付与の `$20` Cloud Credit も有効活用可能）。
+  2. **マルチモーダル検索のGCP内完結（Vertex AI Multimodal Embeddings × Firestore Vector Search）**:
+     - 衣服登録時に `multimodalembedding@001` で画像を1408次元ベクトル化し、Firestore ネイティブの Vector Search に格納。外部ベクトルDB（Pinecone等）を増やさずに「視覚的テイストの調和」と「死蔵衣類の優先ピックアップ」を実現。
+  3. **セキュリティと可観測性（Secret Manager / Firebase ID Token検証 / Cloud Logging）**:
+     - OAuthシークレットは Secret Manager で保護し、Frontend-Backend間は Firebase Auth IDトークンを FastAPI 側で検証。さらに「Clo値フィルタ通過数 → ベクトル検索 → Gemini推論時間」の判断トレースを構造化ログとして Cloud Logging に出力し、ブラックボックス化を防ぐ。
+- 捨てた案と理由:
+  - 案C（GKE / Pub/Sub / BigQuery）はリアルタイム同期推論が中心の本プロダクトには過剰設計（Over-engineering）であり、「なぜCloud Run単体ではダメなのか」という『Own the Why』に合理的な説明がつかないため不採用とした。
+
+

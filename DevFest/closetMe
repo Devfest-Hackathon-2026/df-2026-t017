@@ -4,27 +4,25 @@
 
 | 項目 | 内容 |
 |---|---|
-| 文書種別 | プロダクト企画書・課題定義・要件定義・AI設計書（開発前版） |
-| バージョン | 0.1（2026-11-03） |
+| 文書種別 | プロダクト企画書・課題定義・要件定義・AI/GCP設計書 |
+| バージョン | 0.2（2026-11-06 アーキテクチャ・課題定義確定版） |
 | 対象大会 | DevFest GDG Japan Hackathon 2026 |
-| 対象カテゴリー | **クリエイティブ**（第一候補。コーディネート創作支援）／**教育**（第二候補。服装選びの判断力を学ぶ）。主催者のカテゴリー解釈は要確認 |
+| 対象カテゴリー | **クリエイティブ**（確定：手持ち資産と生活制約から新しい着こなしを発見する創作支援） |
 | 開発期間 | 2026-11-05 10:00 〜 2026-11-10 17:00 |
 | 想定開発人数 | 2名 |
-| 対象プラットフォーム | スマートフォン優先のWebアプリ（PWA化は余裕があれば） |
-| 実行基盤 | Firebase App Hosting（大会必須条件を充足） |
+| 対象プラットフォーム | スマートフォン優先のWebアプリ（レスポンシブ対応） |
+| 実行基盤 | Firebase App Hosting（Frontend）＋ Google Cloud Run（Backend AI Engine） |
 | 重要な前提 | 11/5 10:00以前に製品用ソースコードは書かない。UI設計・環境準備・POCはルールの範囲で実施 |
 
 ---
 
 ## 0. エグゼクティブサマリー
 
-**Closet Me** は、事前登録した手持ちの服から、当日の**天気・気温・時間帯・Google Calendarの予定・本人の好み・直近の着用履歴**を考慮してコーディネートを提案するAIスタイリストである。
+**Closet Me** は、事前登録した手持ちの服から、当日の**天気・気温・時間帯・Google Calendarの予定・本人の好み・着用履歴（死蔵度）**を考慮し、毎日の装いを共創するAIパーソナルスタイリストである。
 
-初回に持っている服を登録すれば、以後は服を買い足したときに追加するだけでよい。毎朝アプリを開くと、選ぶ理由とともに**実際に所有している服の組み合わせ**が最大3案表示される。ユーザーが一つを選び、変更・着用・評価することで、次回以降の提案が自分に合いやすくなる。
+日本の家庭には「1年間一度も袖を通されない死蔵衣類」が1人あたり平均25〜30着存在する。その本質的な原因は「服が足りない」からではなく、**「手持ち服 × 気象条件 × 多様なTPO」の組み合わせパターンを人間が想起しきれず、同じ服ばかり着るか新しい服を買い足してしまうこと**にある。
 
-**本質的価値は、服を生成することではなく、「生活条件」と「実在する手持ちの服」を結び付け、毎朝の判断負荷を小さくすること。**
-
-AIは最終決定者ではない。条件を収集・解釈し、根拠付きの候補を提示する。決めるのはユーザー本人である。
+Closet Me は新しい服をECで買わせるのではなく、**「実在する手持ちの服」と「その日の生活条件」を数理モデルとマルチモーダルAIで結び付け、自分では思いつかなかった着こなしの発見（クリエイティブ支援）と毎朝の意思決定負担の解消を両立**する。AIは根拠付きの選択肢を提示し、最終決定は常にユーザー本人が行う。
 
 ---
 
@@ -32,26 +30,23 @@ AIは最終決定者ではない。条件を収集・解釈し、根拠付きの
 
 ### 1.1 一文で表す課題
 
-> 自分の服は十分に持っているのに、天気・予定・好み・過去の着用履歴を総合して毎朝コーディネートを決めることが面倒で、時間と認知的負担が発生している。
+> クローゼットに十分な服があるにもかかわらず、「天候・時間帯ごとに切り替わる予定（TPO）・手持ち服の組み合わせ」を毎朝統合して考える認知的負荷が高く、結果として毎朝の迷いと「着られない死蔵衣類」が生まれている。
 
 ### 1.2 課題の構造
 
 | 課題 | 具体的な瞬間 | 現状の代替手段 | なお残る問題 |
 |---|---|---|---|
-| 判断条件が多い | 朝、気温・雨・場所・ドレスコードを考える | 天気予報＋カレンダー＋自分の記憶 | 情報が別々に存在する |
-| 手持ち服の把握が難しい | 服はあるのに組み合わせが浮かばない | クローゼットを見返す | 所有服を一覧で比較しにくい |
-| 着用履歴を覚えきれない | 先週と同じコーデになりがち | 記憶・写真 | 記録が分散し継続しにくい |
-| 個人差がある | 同じ18℃でも人によって寒さの感じ方が異なる | 体感による試行錯誤 | 天気だけの一般論が合わない |
-| 服が活用されない | 買ったのに着ていない服がある | たまに整理する | 活躍の機会を見逃す |
-| 入力が面倒 | 初回の服登録 | 手入力・撮影 | 始める前に離脱しやすい |
+| 多拠点TPOの切り替え負荷 | 朝、大学・インターン・会食など複数の予定と寒暖差を考える | 天気予報＋カレンダー＋自分の記憶 | 情報が分断され、全時間帯を満たす服装が浮かばない |
+| 着回し創造の限界（死蔵化） | 服はあるのにいつも同じ組み合わせになり、他の服が眠る | クローゼットを見返す・SNS検索 | SNSの服は自分が持っておらず、所有服の新しい組み合わせに気づけない |
+| 着用履歴と稼働率の忘却 | 先週と同じコーデになりがち・1年着ていない服を忘れる | 記憶・写真 | 記録が分散し、どの服が眠っているか把握できない |
+| 体感と物理条件のズレ | 同じ18℃でも風速や活動量（移動/デスクワーク）で体感が異なる | 勘による試行錯誤 | 単なる気温だけの一般論では夕方寒い・移動中暑い等が起きる |
+| 入力が面倒 | 初回の服登録 | 手入力・撮影 | 始める前に離脱しやすい（写真1枚からの自動構造化が必要） |
 
-### 1.3 課題の優先順位
+### 1.3 課題の優先順位とカテゴリー適合
 
-- **Primary（本課題）**：毎朝のコーデ選択に伴う時間と意思決定負担。
-- **Secondary（副課題）**：既存の所有服が十分に活用されないこと。
-- **Not primary（主課題にはしない）**：ファッションセンスの優劣判定、消費行動全般の改善、衣料廃棄問題の直接解決。
-
-衣服の有効活用は期待できる副次効果であり、購買減少や環境負荷削減を実測せずに成果と断定しない。
+- **Primary（本課題・個人視点）**：多忙な日常（複数TPO・寒暖差）における毎朝のコーディネート意思決定負荷の解消。
+- **Primary（本課題・社会/クリエイティブ視点）**：眠っている手持ち服（死蔵衣類）の新しい組み合わせを発見し、**「制約の中から自分らしいスタイルを創り出す（クリエイティブ）」**ことでクローゼット稼働率を引き上げること。
+- **Not primary（主課題にはしない）**：ファッションセンスの優劣判定、新規購買を促すEC誘導。
 
 ### 1.4 課題仮説（検証前）
 
@@ -207,34 +202,45 @@ Firestore ───────> 手持ち服・着用履歴・好み・利用�
                                                 採用・変更・評価 → 履歴
 ```
 
-### 6.3 推奨：ハイブリッド方式
+### 6.3 採用方式：被服気候学（Clo値数理モデル）× Multimodal Vector Search × Vertex AI Gemini 3段階ハイブリッド推薦
 
-「Geminiにすべて丸投げ」ではなく、**ルールで禁止条件を判定し、Geminiが比較・理由付けを行う構成**を推奨。
+「LLMにすべて丸投げ」ではなく、**①物理的・熱工学的な快適性を数理アルゴリズムで決定論的に担保し、②マルチモーダル埋め込みとベクトル検索で視覚的調和と死蔵衣類を掘り起こし、③TPO適合・最終理由付けをVertex AI Geminiが担う3段階パイプライン**を採用する。
 
-**決定的ルール例**
-- 候補アイテムは必ず手持ち衣服ID集合に含まれる。
-- 洗濯中、非公開・削除済み、サイズ不一致と本人が登録した服は除外。
-- 必要なカテゴリ（トップス・ボトムス等）の整合性を確認。
-- 直近で同じコーデを着た場合は減点。ただし唯一の実行可能な服装なら許容。
-- ユーザーの「絶対に着ない」指定を厳守。
+**Stage 1: 物理的制約充足エンジン（被服気候学 Clo値アルゴリズム）**
+- **Clo値（衣服の断熱性指標）の導入**:
+  - 天気予報の気温・湿度・風速と、Google Calendarの活動予定から推定される代謝量（METs: デスクワーク 1.2 METs 〜 徒歩外出 3.0 METs）を入力。
+  - ISO 7730 / ASHRAE 55 等の被服気候学モデルを簡略化した数理式により、その日に必要な**目標Clo値レンジ（例: 0.85〜1.10 Clo）**を決定論的に算出。
+- **ハード制約フィルタ**:
+  - 候補アイテムは必ずユーザー本人の手持ち衣服ID集合に含まれる。
+  - 洗濯中・利用不可・本人の明示的NGアイテム・雨天時の非撥水靴などを完全除外。
+  - 手持ち服の組み合わせから、合計Clo値が目標レンジに収まる「熱的に安全なコーディネート候補」のみを組み合わせ探索（CSPアプローチ）で絞り込む。
 
-**Geminiの役割**
-- 予定内容の服装要求を解釈。
-- 季節・色・テイストの調和を比較。
-- その日どんな場面でも使いやすいコーデを選ぶ。
-- 提案理由を短く明確に言語化。
+**Stage 2: Vertex AI Multimodal Embeddings × Firestore Vector Search（テイスト調和 ＆ 死蔵衣類ブースト）**
+- 衣服登録時に `multimodalembedding@001` で抽出した1408次元の画像特徴ベクトルと、Firestore ネイティブのベクトル検索（`find_nearest`）を活用。
+- ユーザーの好みスタイルベクトルとのコサイン類似度を計算しつつ、**長期間着用されていない「死蔵気味の服（`dormancyBoost`）」でありながら視覚的テイストが調和するアイテム**を優先的に候補上位へ引き上げる。
 
-### 6.4 スコアリング案（初期値／要検証）
+**Stage 3: Vertex AI Gemini による多基準リランキング & 理由言語化**
+- Stage 1〜2で選別された上位候補群を入力として受け取る（ADC/IAMキーレス認証経由で `asia-northeast1` の Vertex AI を呼び出し）。
+- **Geminiの役割**:
+  - **TPO適合度**: カレンダー予定の活動カテゴリから求められるフォーマル度・ドレスコードへの合致。
+  - **色彩・スタイリング調和**: トーン＆マナー（同系色、補色、モノトーン比率）の評価。
+  - **説明文の生成**: 「なぜこの服なのか（Clo値による快適性・予定への適合・眠っていた服の新しい着回し提案）」を自然言語で端的に解説。
+- **型安全性の担保**: GeminiのStructured Outputs（Pydantic / JSON Schema）を用いて厳格に出力バリデーションを実施。
+
+### 6.4 スコアリング方針（数理モデル ＋ ベクトル類似度 ＋ LLMリランカー）
 
 ```text
-score = 0.30 * weatherFit
-      + 0.30 * scheduleFit
-      + 0.20 * personalPreference
-      + 0.10 * rotationNovelty
-      + 0.10 * stylisticHarmony
+// Stage 1: 物理フィルター（決定論的合格フラグ）
+passPhysics = (clo_min <= totalClo <= clo_max) && !hasBannedItem && isValidCombination
+
+// Stage 2 & 3: ハイブリッド評価スコア
+finalScore = 0.30 * scheduleTPOFit          // カレンダー予定への適合度
+           + 0.25 * vectorStyleSimilarity   // Multimodal Embedding コサイン類似度
+           + 0.25 * stylisticHarmony        // 色彩・シルエット調和
+           + 0.20 * dormancyRevivalScore    // 死蔵衣類の再活用・ローテーション新規性
 ```
 
-各指標は0〜1。ハード制約違反の候補はスコアに関係なく除外。これは**仮の重み**であり、ユーザーテストで調整する。外出先がフォーマルな日には予定適合を優先するなど、状況に応じた重み変更も検討する。
+各指標は0〜1。物理フィルター（Stage 1）に落ちた候補はGeminiの評価対象とせず、推論トークンとレイテンシを大幅に削減する。各ステージの通過件数とレイテンシは構造化ログとして **Cloud Logging** に出力し、推薦根拠の可観測性（Observability）を担保する。
 
 ### 6.5 Gemini入力・出力契約（概念例）
 
@@ -287,17 +293,18 @@ score = 0.30 * weatherFit
 
 ---
 
-## 7. Google技術との親和性と選定理由
+## 7. Google Cloud / Google技術との親和性と選定理由
 
-| 技術 | 用途 | 採用理由 | 注意点 |
+| 技術 | 用途 | 採用理由（Own the Why） | 注意点・設計配慮 |
 |---|---|---|---|
-| **Google Calendar API** | 当日の予定・時間・場所 | 既存の生活データを追加入力なしで使える | 認可・プライバシー・予定内容が曖昧な場合 |
-| **Google Maps Platform Weather API** | 時間帯別の気温・降水など | 朝晩・予定の時間帯と服装を結び付けられる | APIキー・料金・位置データ・予報の不確実性 |
-| **Gemini API** | 衣服画像認識、文脈解釈、コーデ比較 | 画像・文章を横断して解釈する必要がある | 誤分類・幻覚・出力検証・コスト |
-| **Firebase Authentication** | Googleログイン | Googleアカウント体験と統合 | Calendar APIのOAuth同意とは別途設計が必要 |
-| **Cloud Firestore** | 衣服メタデータ、履歴、好み | ユーザー別データとWebアプリに適合 | セキュリティルール、クエリ設計 |
-| **Cloud Storage for Firebase** | 服の画像 | 大量の画像とメタデータを分離 | 容量、アクセス制御、削除対応 |
-| **Firebase App Hosting** | Next.js Webアプリ実行 | 大会指定の実行基盤に該当、デプロイが容易 | Blazeプラン・課金管理・リージョン |
+| **Vertex AI (Gemini Flash)** | 衣服画像構造化（Clo値推定含む）、文脈解釈、コーデ比較・理由生成 | **IAM（ADC）による完全キーレス認証**が可能でAPIキー漏洩リスクがゼロ。東京リージョン固定と大会Cloud Credit活用を両立 | 出力はJSON Schemaで厳格検証・ID実在チェックを実施 |
+| **Vertex AI Multimodal Embeddings** | 衣服画像の1408次元ベクトル化（`multimodalembedding@001`） | テキストタグだけでは表現しきれない「生地の風合い・視覚的テイスト」を数値化し類似探索するため | 登録時に1回のみ計算しFirestoreへ永続化することで低コスト化 |
+| **Cloud Firestore (+ Vector Search)** | 衣服メタデータ、着用履歴、および**ネイティブベクトル検索** | 外部ベクトルDB（Pinecone等）を増やさず、GCP単一データ基盤でトランザクションと近傍探索を完結できる | UID別セキュリティルールと複合ベクトルインデックスを設定 |
+| **Google Cloud Run** | Python (FastAPI) AI推薦・数理最適化エンジンの実行 | 数理計算（Clo値CSP探索）とVertex AI連携を独立コンテナ化し、リクエスト単位でオートスケールさせるため | Firebase Auth IDトークン検証で不正呼び出しを遮断 |
+| **Firebase App Hosting** | Next.js 15 フロントエンド実行 | 大会必須実行基盤を満たし、SSR/モバイルUIを高速配信できるため | デモ用フォールバックモードも実装し審査員の即時体験を保証 |
+| **Google Calendar API** | 当日の予定・時間帯・活動文脈 | 既存の生活データを追加入力なしで活用し、METs（活動代謝量）とTPOを導出するため | 生テキストは保存せず活動カテゴリへサニタイズ |
+| **Google Maps Platform Weather API** | 時間帯別の気温・風速・降水確率 | 朝昼夜の寒暖差とClo値計算を直結させるため（フォールバックとしてOpen-Meteo/手入力も対応） | キャッシュによりコール数を最適化 |
+| **Secret Manager & Cloud Logging** | 機密情報保護・推論パイプラインの構造化トレース | OAuthシークレットの安全な注入と、「物理フィルタ→ベクトル検索→Gemini」の判断過程の可観測性確保 | 個人情報をログに含めないサニタイズを徹底 |
 
 ### 7.1 Calendar APIの扱い
 
@@ -306,79 +313,79 @@ score = 0.30 * weatherFit
 - カレンダーのタイトル・説明には私的情報が含まれるため、服装判断に必要な部分のみ抽出し、送信・保存量を最小化する。
 - イベント名から活動が推定できない場合は「予定の種類を選択してください」と確認する。
 - **GoogleログインしただけではCalendar読み取り許可は付与されない。** 別途スコープと認可が必要。
-- 公開時はOAuth検証・テストユーザー制限等を確認。ハッカソン中のテスト用アカウントと代替デモデータを準備する。
+- 審査員がOAuth同意なしで全機能を即座に試せるよう、リアルな予定・クローゼットを備えた**「1クリック・デモモード」**を標準搭載する。
 
 ### 7.2 Weather APIの扱い
 
 - ユーザーが設定した地域または明示同意した位置情報を使う。
 - 朝・昼・夜、および予定時刻のデータを取得する。
 - 予定に場所がなければ設定地域の予報を使用する。
-- 天気APIが失敗したら、ユーザーによる気温・天気の手入力へ切り替える。
+- 天気APIが失敗したら、代替気象データまたはユーザーによる気温・天気の手入力へ切り替える。
 - リクエスト数・キャッシュ・課金上限を管理する。
 
-### 7.3 Gemini APIの使い方と選定のWhy
+### 7.3 Vertex AI (Gemini & Embeddings) の使い方と選定のWhy
 
-**Why Gemini?**
-1. 服の写真から構造化メタデータを抽出するマルチモーダル能力が必要。
-2. Calendarの自然言語イベントを、服装に必要な活動タイプへ変換する能力が必要。
-3. 複数の条件が衝突するとき、説明可能な選択肢を作ることが必要。
+**Why Vertex AI (instead of AI Studio API Key)?**
+1. Cloud Run サービスアカウント（IAM）によるキーレス認証（ADC）により、APIキー漏洩リスクを原理的に排除できる。
+2. 同一リージョン（`asia-northeast1`）内通信による低レイテンシとデータガバナンスを確保できる。
+3. Geminiによる構造化タグ抽出と、`multimodalembedding@001` による視覚ベクトル抽出を単一のGCP基盤上で統合できる。
 
-**Why not Gemini only?**
-- 幻覚により未所有アイテムが出る危険がある。
-- 明示的NG条件はルールで確実に守るべき。
-- AIの文章だけでは整合性を検証しにくい。
-
-そのため、**Gemini + 制約フィルタ + 構造化出力 + ID検証**を採用する。
+**Why not LLM only?**
+- 確率的モデル単体では、未所有アイテムの捏造や、寒い日に薄着を勧めるハルシネーションを排除できない。
+- そのため、**被服気候学（Clo値）物理フィルタ + Firestore Vector Search + Vertex AI Gemini構造化出力 + ID実在検証**の多層防御を採用する。
 
 ---
 
-## 8. 技術アーキテクチャ（案）
+## 8. 技術アーキテクチャ（確定：GCPネイティブ構成）
 
 ```text
-[スマートフォン / Next.js UI]
-             |
-             | Firebase Auth
-             v
-[Next.js Server Actions / Route Handlers]
-   |            |                |
-   |            |                +--> Gemini API（サーバーからのみ）
-   |            +--> Google Calendar API（認可済ユーザーのトークン）
-   +--> Google Weather API（サーバーからのみ）
-   |
-   +--> Cloud Firestore（衣服・履歴・プロフィール）
-   +--> Cloud Storage（衣服画像）
-
-[Firebase App Hosting / Google Cloud]
++-----------------------------------------------------------------------------+
+| [Frontend] Next.js 15 (App Router / TypeScript / Tailwind CSS)              |
+| -> 実行基盤: Firebase App Hosting (大会指定実行基盤)                         |
+| - Firebase Auth (Googleログイン) / Google Calendar OAuth / 1-Click デモモード |
++-----------------------------------------------------------------------------+
+                                      |
+                      HTTPS + Firebase ID Token 認証
+                                      v
++-----------------------------------------------------------------------------+
+| [Backend AI Engine] Python 3.12 + FastAPI                                   |
+| -> 実行基盤: Google Cloud Run (asia-northeast1 / IAM サービスアカウント)     |
+|                                                                             |
+|  [Stage 1] Physics Engine    : 気象×活動量(METs) → 目標Clo値算出 & CSP探索  |
+|  [Stage 2] Vector Revival    : 視覚類似度 × 死蔵衣類ブースト計算            |
+|  [Stage 3] Gemini Re-ranker  : TPO適合・色彩調和・推薦理由の構造化生成       |
++-----------------------------------------------------------------------------+
+     | (ADC/IAM キーレス)          |                              |
+     v                             v                              v
++-------------------------+  +---------------------------+  +-----------------+
+| Google Cloud Vertex AI  |  | Cloud Firestore           |  | Observability & |
+| - Gemini Flash          |  | - 衣服メタデータ (Clo値)  |  | Security        |
+| - Multimodal Embeddings |  | - Native Vector Search    |  | - Secret Manager|
+|   (1408-dim vector)     |  | - 着用履歴・死蔵スコア    |  | - Cloud Logging |
++-------------------------+  +---------------------------+  +-----------------+
 ```
 
-- 技術選定：Next.js App Router / TypeScript / Tailwind CSS / Firebase SDK / Gemini API。
-- APIキー・認可トークンはクライアントに直書きしない。
-- リポジトリは開発用と主催者提出用を分離し、提出規定に従い最終版をPushする。
-- Firebase App Hostingは内部的にCloud Run等を利用するが、**大会要件上はFirebase App Hosting自体が指定実行基盤**。
+- **アーキテクチャの分離理由（Why）**:
+  - UI層（Next.js on Firebase App Hosting）と、数理最適化・マルチモーダルAI推論層（FastAPI on Cloud Run）の関心を分離。
+  - GKEやPub/Sub等の過剰な非同期基盤をあえて排除し、朝の体験に求められる「数秒以内の低遅延同期レスポンス」と「運用保守のシンプルさ」を最適化した。
 
----
-
-## 9. データモデル（案）
+## 9. データモデル（確定）
 
 ```text
 users/{uid}
   displayName, createdAt, locale, timezone
-  coldSensitivity, preferredStyles, excludedItems, locationPreference
+  coldSensitivity (-1:寒がり, 0:標準, +1:暑がり), preferredStyles[], styleVector[]
 
 users/{uid}/clothes/{clothingId}
-  imagePath, category, subtype, colors[], materials[], warmthLevel
-  formality, seasonalTags[], notes, availability, source, createdAt
-  aiClassificationConfidence, userVerified
+  name, imageUrl, category (top|bottom|outer|shoes), subtype
+  colors[], formality (1..5), cloValue (float: 断熱性指標), waterResistant (bool)
+  embedding (Vector<1408>: Vertex AI Multimodal Embedding)
+  wearCount (int), lastWornAt (timestamp), availability (available|laundry)
+  aiClassificationConfidence, userVerified, createdAt
 
 users/{uid}/outfits/{outfitId}
-  date, itemIds[], origin, reasons[], weatherSnapshot
-  eventCategories[], status (suggested|worn|rejected), createdAt
-
-users/{uid}/feedback/{feedbackId}
-  outfitId, temperatureFeeling, likeLevel, comment, createdAt
-
-users/{uid}/preferences/{preferenceId}
-  key, value, source (user|feedback), updatedAt
+  date, itemIds[], totalClo, targetCloRange, reasons[], weatherSnapshot
+  eventSummaries[], traceMetrics (stage1Count, latencyMs), status (suggested|worn)
 ```
 
 **データ取り扱い**

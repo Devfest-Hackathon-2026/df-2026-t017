@@ -1,0 +1,14 @@
+# Firebase App Hosting Configuration (DevFest Mandatory Runtime)
+runConfig:
+  minInstances: 0
+  maxInstances: 4
+  concurrency: 80
+  cpu: 1
+  memoryMiB: 512
+
+env:
+  - variable: NEXT_PUBLIC_API_BASE_URL
+    value: https://closet-me-engine-asia-northeast1.a.run.app/api/v1
+    availability:
+      - BUILD
+      - RUNTIME

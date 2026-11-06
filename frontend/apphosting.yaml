@@ -8,7 +8,7 @@ runConfig:
 
 env:
   - variable: NEXT_PUBLIC_API_BASE_URL
-    value: https://closet-me-engine-asia-northeast1.a.run.app/api/v1
+    value: https://closet-me-engine-778086128902.asia-northeast1.run.app/api/v1
     availability:
       - BUILD
       - RUNTIME

@@ -26,6 +26,7 @@
    │  HTTPS + Firebase Auth ID Token
    ▼
 [Google Cloud Run] ─────── FastAPI (Python 3.12 / asia-northeast1)
+   │  本番URL: https://closet-me-engine-778086128902.asia-northeast1.run.app
    ├── Stage 1: Physics Engine (被服気候学 Clo値 × METs 制約充足ソルバー)
    ├── Stage 2: Vector Revival (Vertex AI Multimodal Embeddings × Firestore Vector Search)
    ├── Stage 3: Multi-Criteria Re-ranker (Vertex AI Gemini via IAM/ADC キーレス認証)

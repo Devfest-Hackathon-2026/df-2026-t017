@@ -727,16 +727,11 @@ export default function ClosetMeChatApp() {
         <div className="mx-auto flex max-w-4xl items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3">
           {/* Logo & Subtitle */}
           <div className="flex items-center gap-2.5">
-            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-900 text-white shadow-xs">
-              <Shirt className="h-4.5 w-4.5 text-zinc-100" />
+            <div className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-zinc-900 text-white shadow-xs">
+              <Shirt className="h-4 w-4 sm:h-4.5 sm:w-4.5 text-zinc-100" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h1 className="text-sm sm:text-base font-bold tracking-tight">Closet Me</h1>
-                <span className="rounded-full bg-zinc-100 px-2 py-0.2 text-[10px] font-bold text-zinc-600">
-                  DevFest 2026
-                </span>
-              </div>
+              <h1 className="text-sm sm:text-base font-bold tracking-tight">Closet Me</h1>
               <p className="text-[10px] text-zinc-500 hidden sm:block">
                 被服気候学(Clo値) × パーソナルスタイリスト
               </p>

@@ -40,9 +40,9 @@ export function ChatComposer({
   const canSend = inputText.trim().length > 0 && !disabled;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-20 pointer-events-none pb-4 pt-10 sm:pb-6 bg-gradient-to-t from-[#FAF9F6] via-[#FAF9F6]/85 to-transparent">
-      <div className="mx-auto max-w-3xl px-3 sm:px-4 space-y-2 pointer-events-auto">
-        {/* おすすめ選択肢チップバー（軽やかに浮遊するピルボタン・キラキラ廃止） */}
+    <div className="fixed bottom-0 left-0 right-0 z-20 pointer-events-none pb-2 pt-4 sm:pb-5 sm:pt-8 bg-gradient-to-t from-[#FAF9F6] via-[#FAF9F6]/90 to-transparent">
+      <div className="mx-auto max-w-3xl px-3 sm:px-4 space-y-1.5 pointer-events-auto">
+        {/* おすすめ選択肢チップバー（軽やかに浮遊するピルボタン） */}
         {suggestedChips.length > 0 && (
           <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5 scrollbar-none text-xs">
             {suggestedChips.map((chip, idx) => (
@@ -50,7 +50,7 @@ export function ChatComposer({
                 key={`${chip}_${idx}`}
                 onClick={() => onSelectChip(chip)}
                 disabled={disabled}
-                className="shrink-0 rounded-full border border-zinc-200/90 bg-white/90 backdrop-blur-md px-3.5 py-1 text-xs font-medium text-zinc-700 shadow-2xs hover:bg-zinc-900 hover:text-white hover:border-zinc-900 transition active:scale-95 disabled:opacity-50 cursor-pointer"
+                className="shrink-0 rounded-full border border-zinc-200/90 bg-white/95 backdrop-blur-md px-3 py-1 text-xs font-medium text-zinc-700 shadow-2xs hover:bg-zinc-900 hover:text-white hover:border-zinc-900 transition active:scale-95 disabled:opacity-50 cursor-pointer"
               >
                 {chip.replace(/[✨🔥👟🧥🥶📷📅]/g, "").trim()}
               </button>
@@ -58,9 +58,9 @@ export function ChatComposer({
           </div>
         )}
 
-        {/* ChatGPT風 フローティング・ピル型カプセルインプット */}
-        <div className="rounded-3xl border border-zinc-200/90 bg-white/95 backdrop-blur-xl shadow-lg shadow-zinc-900/5 transition-all duration-200 focus-within:border-zinc-400 focus-within:shadow-xl">
-          <form onSubmit={handleSubmit} className="flex items-center gap-2 px-3 py-2 sm:px-3.5 sm:py-2.5">
+        {/* ChatGPT風 フローティング・ピル型カプセルインプット（スマホ押しやすさ最適化） */}
+        <div className="rounded-3xl border border-zinc-200/90 bg-white shadow-lg shadow-zinc-900/5 transition-all duration-200 focus-within:border-zinc-400 focus-within:shadow-xl">
+          <form onSubmit={handleSubmit} className="flex items-center gap-1.5 sm:gap-2 px-2.5 py-1.5 sm:px-3 sm:py-2">
             <input
               type="file"
               accept="image/*"
@@ -69,7 +69,7 @@ export function ChatComposer({
               className="hidden"
               disabled={disabled}
             />
-            {/* 写真追加ボタン（シンプルで上品なカメラボタン） */}
+            {/* 写真追加ボタン */}
             <button
               type="button"
               onClick={() => fileInputRef.current?.click()}
@@ -80,19 +80,19 @@ export function ChatComposer({
               <Camera className="h-4.5 w-4.5" />
             </button>
 
-            {/* ボーダーレス入力エリア */}
-            <div className="relative flex-1">
+            {/* 入力エリア: text-base (16px) でiOS Safariの自動ズームを完全防止 */}
+            <div className="relative flex-1 min-w-0">
               <input
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="メッセージを入力（例: 黒のタートルネック追加、靴を変えたい）"
+                placeholder="メッセージを入力..."
                 disabled={disabled}
-                className="w-full bg-transparent px-1 py-1 text-xs sm:text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:text-zinc-400"
+                className="w-full bg-transparent px-1 py-1.5 text-base sm:text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:text-zinc-400"
               />
             </div>
 
-            {/* ChatGPT風の円形上向き矢印送信ボタン */}
+            {/* 円形上向き矢印送信ボタン */}
             <button
               type="submit"
               disabled={!canSend}

@@ -147,12 +147,7 @@ export function ChatMessageList({
 
                 {/* 2. コーデ提案カード群 (横スライド・コンパクトカルーセル表示) */}
                 {msg.attachment.type === "outfits" && (
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between text-[11px] text-zinc-400 px-0.5">
-                      <span>提案コーディネート（全{msg.attachment.outfits.length}案）</span>
-                      <span className="text-[10px]">横にスワイプ ➔</span>
-                    </div>
-
+                  <div className="space-y-1">
                     {/* 横スクロール & スナップコンテナ */}
                     <div className="flex gap-3 overflow-x-auto snap-x snap-mandatory pb-2 pt-0.5 px-0.5 scrollbar-none -mx-1">
                       {msg.attachment.outfits.map((outfit) => {

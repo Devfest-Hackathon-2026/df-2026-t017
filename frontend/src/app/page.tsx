@@ -748,10 +748,9 @@ export default function ClosetMeChatApp() {
             {/* 稼働率バッジ */}
             <div
               onClick={() => setIsClosetDrawerOpen(true)}
-              className="hidden sm:flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/80 px-2.5 py-1 text-xs font-bold text-emerald-800 cursor-pointer hover:bg-emerald-100 transition"
+              className="hidden sm:flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-700 cursor-pointer hover:bg-zinc-100 transition"
               title="クローゼット一覧を開く"
             >
-              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
               <span>稼働率 {utilizationRate}%</span>
             </div>
 
@@ -849,7 +848,7 @@ export default function ClosetMeChatApp() {
         onItemDetail={(item) => setSelectedItemDetail(item)}
         onTriggerPhotoUpload={() => {
           setIsClosetDrawerOpen(false);
-          handleSelectChip("📷 服を登録する");
+          handleSelectChip("服を登録する");
         }}
         onSearchCrossModal={async (query) => {
           return searchWardrobeCrossModal({ query, wardrobe });
@@ -893,11 +892,11 @@ export default function ClosetMeChatApp() {
       {selectedItemDetail && (
         <div
           onClick={() => setSelectedItemDetail(null)}
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-xs p-4"
         >
           <div
             onClick={(e) => e.stopPropagation()}
-            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl space-y-3"
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-xl space-y-3"
           >
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
@@ -924,7 +923,7 @@ export default function ClosetMeChatApp() {
             <div>
               <h4 className="text-sm font-bold text-zinc-900">{selectedItemDetail.name}</h4>
               <p className="text-[11px] text-zinc-500 mt-0.5">
-                {selectedItemDetail.colors.join("・")} | スタイル: {selectedItemDetail.style_tags.join(", ") || "ベーシック"}
+                {selectedItemDetail.colors.join("・")} | {selectedItemDetail.style_tags.join(", ") || "ベーシック"}
               </p>
             </div>
 

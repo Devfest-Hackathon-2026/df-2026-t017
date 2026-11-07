@@ -10,7 +10,6 @@ import {
   Plus,
   RefreshCw,
   Shirt,
-  Sparkles,
   X,
 } from "lucide-react";
 import {
@@ -87,11 +86,11 @@ export default function ClosetMeChatApp() {
   // チャットタイムライン状態
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [suggestedChips, setSuggestedChips] = useState<string[]>([
-    "✨ 今日のコーデを見る",
-    "🔥 眠っている服を優先",
-    "👟 靴だけ変える",
-    "📷 服を登録する",
-    "📅 カレンダー連携",
+    "今日のコーデを見る",
+    "眠っている服を優先",
+    "靴だけ変える",
+    "服を登録する",
+    "カレンダー連携",
   ]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -154,11 +153,11 @@ export default function ClosetMeChatApp() {
         setMessages((prev) => [...prev, newMsg]);
         setSuggestedChips([
           "今日これを着る",
-          "🔥 眠っている服を優先",
-          "👟 靴だけ変える",
-          "🧥 アウターを変える",
-          "🥶 少し暖かくする",
-          "📷 服を追加する",
+          "眠っている服を優先",
+          "靴だけ変える",
+          "アウターを変える",
+          "少し暖かくする",
+          "服を追加する",
         ]);
         scrollToBottom();
       } catch (err) {
@@ -729,7 +728,7 @@ export default function ClosetMeChatApp() {
           {/* Logo & Subtitle */}
           <div className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-900 text-white shadow-xs">
-              <Sparkles className="h-4.5 w-4.5 text-amber-300" />
+              <Shirt className="h-4.5 w-4.5 text-zinc-100" />
             </div>
             <div>
               <div className="flex items-center gap-2">
@@ -739,7 +738,7 @@ export default function ClosetMeChatApp() {
                 </span>
               </div>
               <p className="text-[10px] text-zinc-500 hidden sm:block">
-                被服気候学(Clo値) × Vertex AI パーソナルスタイリスト
+                被服気候学(Clo値) × パーソナルスタイリスト
               </p>
             </div>
           </div>

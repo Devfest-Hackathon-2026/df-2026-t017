@@ -18,10 +18,8 @@ import {
   MapPin,
   RefreshCw,
   Shirt,
-  Sparkles,
   Sun,
   Wind,
-  Zap,
 } from "lucide-react";
 import {
   AnalyzeClothingResponse,
@@ -70,7 +68,7 @@ export function ChatMessageList({
   const [openTraceId, setOpenTraceId] = useState<string | null>(null);
 
   return (
-    <div className="flex-1 space-y-4 px-3 py-4 sm:px-4 sm:py-6 max-w-4xl mx-auto w-full">
+    <div className="flex-1 space-y-4 px-3 py-4 sm:px-4 sm:py-6 pb-36 sm:pb-40 max-w-4xl mx-auto w-full">
       {messages.map((msg) => {
         const isUser = msg.sender === "user";
 
@@ -79,14 +77,14 @@ export function ChatMessageList({
             key={msg.id}
             className={`flex flex-col ${isUser ? "items-end" : "items-start"} space-y-1.5`}
           >
-            {/* 送信者ラベル */}
+            {/* 送信者ラベル（AIキラキラ廃止・ミニマルなタイポグラフィ） */}
             <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 px-1">
               {!isUser && (
                 <div className="flex h-4 w-4 items-center justify-center rounded-full bg-zinc-900 text-white text-[9px] font-bold">
-                  <Sparkles className="h-2.5 w-2.5" />
+                  C
                 </div>
               )}
-              <span>{isUser ? "あなた" : "Closet Me スタイリスト"}</span>
+              <span className="font-medium text-zinc-600">{isUser ? "あなた" : "Closet Me"}</span>
               <span>•</span>
               <span>{msg.timestamp}</span>
             </div>
@@ -443,8 +441,7 @@ export function ChatMessageList({
                   <div className="rounded-2xl border border-indigo-200 bg-white p-4 shadow-2xs space-y-3">
                     <div className="flex items-center justify-between border-b border-zinc-100 pb-2">
                       <span className="text-xs font-bold text-indigo-950 flex items-center gap-1">
-                        <Zap className="h-3.5 w-3.5 text-indigo-600" />
-                        <span>「{msg.attachment.query}」のベクトル類似度検索結果</span>
+                        <span>「{msg.attachment.query}」の類似度検索結果</span>
                       </span>
                       <button
                         onClick={onOpenClosetDrawer}
@@ -560,7 +557,6 @@ function DraftClothingCard({
     <div className="rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4 shadow-2xs space-y-3">
       <div className="flex items-center justify-between border-b border-emerald-100 pb-2">
         <span className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
-          <Sparkles className="h-3.5 w-3.5 text-emerald-600" />
           <span>服の解析結果プレビュー（内容を確認して登録）</span>
         </span>
         <span className="text-[10px] text-emerald-700 font-mono">

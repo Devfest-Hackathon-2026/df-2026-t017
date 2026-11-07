@@ -161,20 +161,31 @@ export function ChatMessageList({
                   </div>
                 )}
 
-                {/* 2. コーデ提案カード群 (3案) */}
+                {/* 2. コーデ提案カード群 (横スライド・カルーセル表示) */}
                 {msg.attachment.type === "outfits" && (
-                  <div className="space-y-4">
-                    <div className="grid gap-3.5 md:grid-cols-3">
+                  <div className="space-y-3.5">
+                    {/* カルーセルガイド */}
+                    <div className="flex items-center justify-between text-[11px] text-zinc-500 px-0.5">
+                      <span className="font-semibold text-zinc-700">
+                        提案コーディネート（全{msg.attachment.outfits.length}案）
+                      </span>
+                      <span className="text-[10px] text-zinc-400">
+                        横にスライドして比較 ➔
+                      </span>
+                    </div>
+
+                    {/* 横スクロール & スナップコンテナ */}
+                    <div className="flex gap-3.5 overflow-x-auto snap-x snap-mandatory pb-2.5 pt-0.5 px-0.5 scrollbar-none -mx-1">
                       {msg.attachment.outfits.map((outfit) => {
                         const isChosen = selectedOutfitRank === outfit.rank;
 
                         return (
                           <div
                             key={outfit.rank}
-                            className={`flex flex-col justify-between rounded-2xl border bg-white p-4 transition shadow-2xs ${
+                            className={`flex flex-col justify-between rounded-2xl border bg-white p-4 transition-all duration-200 shadow-2xs shrink-0 snap-center sm:snap-start w-[84vw] max-w-[320px] sm:w-[310px] ${
                               isChosen
-                                ? "border-zinc-900 ring-2 ring-zinc-900/10 shadow-sm"
-                                : "border-zinc-200/90 hover:border-zinc-300"
+                                ? "border-zinc-900 ring-2 ring-zinc-900/10 shadow-md"
+                                : "border-zinc-200/90 hover:border-zinc-300 hover:shadow-xs"
                             }`}
                           >
                             <div className="space-y-3">

@@ -24,7 +24,22 @@ declare global {
 }
 
 const GIS_SCRIPT_ID = "google-identity-services-script";
-const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly";
+// 予定の読み取りおよび着用コーデの自動書き込みを行うスコープ
+const CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events";
+
+export interface CreateOutfitCalendarEventParams {
+  targetDate?: Date;
+  title: string;
+  itemsSummary: string;
+  descriptionLines: string[];
+  colorId?: string;
+}
+
+export interface GoogleCalendarEventResult {
+  id: string;
+  htmlLink?: string;
+  summary: string;
+}
 
 /**
  * Google Identity Services (GIS) のスクリプトタグを動的ロードする
@@ -225,4 +240,118 @@ export function getSimulatedGoogleEvents(): RawCalendarEvent[] {
       location: "恵比寿ガーデンプレイス付近 ビストロ",
     },
   ];
+}
+
+/**
+ * 日付オブジェクトを YYYY-MM-DD 文字列に変換
+ */
+function formatDateToYMD(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+/**
+ * 日付オブジェクトを YYYYMMDD 文字列に変換（Google Web URL用）
+ */
+function formatDateToCompact(d: Date): string {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}${month}${day}`;
+}
+
+/**
+ * Google Calendar API v3 を直接呼び出し、本日の着用コーデを「終日イベント」として新規作成する
+ * transparency: "transparent" に設定することで、仕事のスケジュール枠（空き時間）を邪魔しません。
+ */
+export async function createGoogleCalendarOutfitEvent(
+  accessToken: string,
+  params: CreateOutfitCalendarEventParams
+): Promise<GoogleCalendarEventResult> {
+  const targetDate = params.targetDate || new Date();
+  const nextDate = new Date(targetDate);
+  nextDate.setDate(nextDate.getDate() + 1);
+
+  const startDateStr = formatDateToYMD(targetDate);
+  const endDateStr = formatDateToYMD(nextDate);
+
+  const summary = params.title.startsWith("👔") ? params.title : `👔 ${params.title}`;
+  const description = [
+    `【Closet Me — 本日のコーディネート記録】`,
+    `スタイル: ${params.itemsSummary}`,
+    ``,
+    ...params.descriptionLines,
+    ``,
+    `※ Closet Me AIパーソナルスタイリストにより自動記録されました。`,
+  ].join("\n");
+
+  const eventPayload = {
+    summary,
+    description,
+    start: {
+      date: startDateStr,
+    },
+    end: {
+      date: endDateStr,
+    },
+    transparency: "transparent", // 「空き時間」として登録（会議ブロックを防ぐ）
+    colorId: params.colorId || "2", // セージ（グリーン系）
+  };
+
+  const res = await fetch("https://www.googleapis.com/calendar/v3/calendars/primary/events", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(eventPayload),
+  });
+
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(`Google Calendar イベント作成失敗 (${res.status}): ${errorText}`);
+  }
+
+  const data = await res.json();
+  return {
+    id: data.id,
+    htmlLink: data.htmlLink,
+    summary: data.summary,
+  };
+}
+
+/**
+ * Google カレンダー公式 Web UI の「予定作成（テンプレート）」URL を生成
+ * OAuthトークンが手元にない場合でも、ブラウザ上で1クリックで本物のGoogleカレンダーに予定を登録可能
+ */
+export function generateGoogleCalendarTemplateUrl(
+  params: CreateOutfitCalendarEventParams
+): string {
+  const targetDate = params.targetDate || new Date();
+  const nextDate = new Date(targetDate);
+  nextDate.setDate(nextDate.getDate() + 1);
+
+  const startStr = formatDateToCompact(targetDate);
+  const endStr = formatDateToCompact(nextDate);
+
+  const summary = params.title.startsWith("👔") ? params.title : `👔 ${params.title}`;
+  const details = [
+    `【Closet Me — 本日のコーディネート記録】`,
+    `スタイル: ${params.itemsSummary}`,
+    ``,
+    ...params.descriptionLines,
+    ``,
+    `※ Closet Me AIパーソナルスタイリストにより記録`,
+  ].join("\n");
+
+  const url = new URL("https://calendar.google.com/calendar/render");
+  url.searchParams.set("action", "TEMPLATE");
+  url.searchParams.set("text", summary);
+  url.searchParams.set("dates", `${startStr}/${endStr}`);
+  url.searchParams.set("details", details);
+  url.searchParams.set("transp", "TRANSPARENT");
+
+  return url.toString();
 }

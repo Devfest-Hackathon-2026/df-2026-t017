@@ -1,5 +1,7 @@
 import {
   AnalyzeClothingResponse,
+  ChatIntentRequest,
+  ChatIntentResponse,
   ClothingCategory,
   ClothingItem,
   CrossModalSearchResult,
@@ -113,6 +115,23 @@ export async function fetchSwapCandidates(params: {
   });
   if (!res.ok) {
     throw new Error(`Failed to fetch swap candidates: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function interpretChatMessage(
+  params: ChatIntentRequest
+): Promise<ChatIntentResponse> {
+  const res = await fetch(`${API_BASE}/chat/intent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Demo-Mode": "true",
+    },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    throw new Error(`Chat intent failed: ${res.status}`);
   }
   return res.json();
 }

@@ -1,45 +1,30 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeftRight,
   Calendar,
-  CalendarPlus,
-  Check,
   CheckCircle2,
-  ChevronRight,
-  Clock,
-  CloudRain,
+  ChevronDown,
   Compass,
-  Cpu,
-  Filter,
-  Flame,
-  Layers,
   MapPin,
   Plus,
   RefreshCw,
-  Search,
-  ShieldCheck,
   Shirt,
   Sparkles,
-  Sun,
-  Thermometer,
-  Trash2,
-  Upload,
-  Wind,
   X,
-  Zap,
 } from "lucide-react";
 import {
   analyzeClothingPhoto,
   fetchDemoContext,
   fetchSwapCandidates,
+  interpretChatMessage,
   lookupWeather,
   requestRecommendations,
   searchWardrobeCrossModal,
 } from "@/lib/apiClient";
 import {
   AnalyzeClothingResponse,
+  ChatMessage,
   ClothingCategory,
   ClothingItem,
   CrossModalSearchResult,
@@ -47,16 +32,21 @@ import {
   OutfitProposal,
   PipelineTrace,
   RawCalendarEvent,
-  SwapCandidateItem,
   UserProfile,
   WeatherSnapshot,
 } from "@/types/closet";
 import {
+  createGoogleCalendarOutfitEvent,
   fetchGoogleCalendarEvents,
+  generateGoogleCalendarTemplateUrl,
   getGoogleCalendarAccessToken,
   getSimulatedGoogleEvents,
   isGoogleAuthAvailable,
 } from "@/lib/googleCalendar";
+import { ChatMessageList } from "@/components/chat/ChatMessageList";
+import { ChatComposer } from "@/components/chat/ChatComposer";
+import { ClosetDrawer } from "@/components/drawers/ClosetDrawer";
+import { ContextDrawer } from "@/components/drawers/ContextDrawer";
 
 const CATEGORY_LABELS: Record<ClothingCategory, string> = {
   top: "トップス",
@@ -65,46 +55,14 @@ const CATEGORY_LABELS: Record<ClothingCategory, string> = {
   shoes: "シューズ",
 };
 
-const POPULAR_CITIES = [
-  "東京・渋谷",
-  "神奈川・横浜",
-  "大阪・梅田",
-  "京都・烏丸",
-  "愛知・名古屋",
-  "福岡・天神",
-  "北海道・札幌",
-  "宮城・仙台",
-];
-
-function roundToTwo(val: number): number {
-  return Math.round(val * 100) / 100;
-}
-
-export default function ClosetMeApp() {
-  const [activeTab, setActiveTab] = useState<"today" | "closet">("today");
+export default function ClosetMeChatApp() {
+  // 基本状態
   const [wardrobe, setWardrobe] = useState<ClothingItem[]>([]);
   const [presets, setPresets] = useState<DemoPreset[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
 
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
-  const [isChangingCity, setIsChangingCity] = useState<boolean>(false);
-  const [customCityInput, setCustomCityInput] = useState<string>("");
-  const [weatherLoading, setWeatherLoading] = useState<boolean>(false);
-
   const [events, setEvents] = useState<RawCalendarEvent[]>([]);
-  const [isAddingEvent, setIsAddingEvent] = useState<boolean>(false);
-  const [newEvent, setNewEvent] = useState({
-    title: "",
-    start_time: "14:00",
-    end_time: "16:00",
-    location: "",
-  });
-
-  // Google Calendar 連携State
-  const [gcalStatus, setGcalStatus] = useState<"disconnected" | "connected_real" | "connected_demo">("disconnected");
-  const [isGCalLoading, setIsGCalLoading] = useState<boolean>(false);
-  const [gcalMessage, setGcalMessage] = useState<string | null>(null);
-
   const [profile, setProfile] = useState<UserProfile>({
     cold_sensitivity: 0,
     preferred_styles: ["clean", "minimal"],
@@ -112,47 +70,56 @@ export default function ClosetMeApp() {
   });
   const [recentWornIds, setRecentWornIds] = useState<string[]>([]);
   const [selectedOutfitRank, setSelectedOutfitRank] = useState<number | null>(null);
+  const [latestOutfits, setLatestOutfits] = useState<OutfitProposal[]>([]);
+  const [latestTrace, setLatestTrace] = useState<PipelineTrace | null>(null);
 
-  const [outfits, setOutfits] = useState<OutfitProposal[]>([]);
-  const [trace, setTrace] = useState<PipelineTrace | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // Google Calendar 状態
+  const [gcalStatus, setGcalStatus] = useState<"disconnected" | "connected_real" | "connected_demo">("disconnected");
+  const [gcalAccessToken, setGcalAccessToken] = useState<string | null>(null);
+  const [isGCalLoading, setIsGCalLoading] = useState<boolean>(false);
+  const [isCalendarSaving, setIsCalendarSaving] = useState<boolean>(false);
 
-  // クローゼット絞り込み
-  const [selectedCategory, setSelectedCategory] = useState<"all" | ClothingCategory>("all");
-  const [filterDormantOnly, setFilterDormantOnly] = useState<boolean>(false);
-
-  // 服追加フォーム用State
-  const [analyzingPhoto, setAnalyzingPhoto] = useState<boolean>(false);
-  const [previewPhotoUrl, setPreviewPhotoUrl] = useState<string | null>(null);
-  const [analyzedDraft, setAnalyzedDraft] = useState<AnalyzeClothingResponse | null>(null);
-
-  // 衣服詳細モーダル用State
+  // ドロワー開閉状態
+  const [isClosetDrawerOpen, setIsClosetDrawerOpen] = useState(false);
+  const [isContextDrawerOpen, setIsContextDrawerOpen] = useState(false);
   const [selectedItemDetail, setSelectedItemDetail] = useState<ClothingItem | null>(null);
 
-  // 【新機能1】Vertex AI クロスモーダル・テイスト検索State
-  const [crossModalQuery, setCrossModalQuery] = useState<string>("");
-  const [crossModalResults, setCrossModalResults] = useState<CrossModalSearchResult[] | null>(null);
-  const [searchingCrossModal, setSearchingCrossModal] = useState<boolean>(false);
+  // チャットタイムライン状態
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [suggestedChips, setSuggestedChips] = useState<string[]>([
+    "✨ 今日のコーデを見る",
+    "🔥 眠っている服を優先",
+    "👟 靴だけ変える",
+    "📷 服を登録する",
+    "📅 カレンダー連携",
+  ]);
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // 【新機能2】被服気候学CSP連動アイテム部分入れ替え（Swap）State
-  const [swapModal, setSwapModal] = useState<{
-    outfitRank: number;
-    targetCategory: ClothingCategory;
-    currentItemIds: string[];
-    candidates: SwapCandidateItem[];
-  } | null>(null);
-  const [swapLoading, setSwapLoading] = useState<boolean>(false);
+  const chatBottomRef = useRef<HTMLDivElement>(null);
 
-  const runRecommendation = useCallback(
+  const scrollToBottom = () => {
+    setTimeout(() => {
+      chatBottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 80);
+  };
+
+  const getNowTime = () => {
+    const d = new Date();
+    return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+
+  // メインの被服気候学 3段階推薦パイプライン実行
+  const executeRecommendation = useCallback(
     async (
       w: WeatherSnapshot,
       ev: RawCalendarEvent[],
       prof: UserProfile,
       items: ClothingItem[],
-      recent: string[]
+      recent: string[],
+      customIntroText?: string
     ) => {
-      setLoading(true);
+      setIsLoading(true);
       setErrorMsg(null);
       try {
         const res = await requestRecommendations({
@@ -162,467 +129,667 @@ export default function ClosetMeApp() {
           wardrobe: items,
           recent_worn_ids: recent,
         });
-        setOutfits(res.outfits);
-        setTrace(res.trace);
+        setLatestOutfits(res.outfits);
+        setLatestTrace(res.trace);
         setSelectedOutfitRank(null);
-      } catch (err) {
-        setErrorMsg(
-          err instanceof Error
-            ? err.message
-            : "バックエンドエンジンへの接続に失敗しました（Cloud Run または uvicorn を確認してください）。"
+
+        const time = getNowTime();
+        const intro = customIntroText || (
+          `おはようございます！今日の${w.location_name}の天気（最高${w.afternoon_temp_c}℃ / 降水確率${Math.round(w.rain_probability * 100)}%）と、予定（${ev.length}件）に合わせて、被服気候学（目標 ${res.trace.target_clo_min}〜${res.trace.target_clo_max} Clo）に基づいた3つのコーディネートを最適化しました。`
         );
+
+        const newMsg: ChatMessage = {
+          id: `msg_${Date.now()}`,
+          sender: "assistant",
+          timestamp: time,
+          text: intro,
+          attachment: {
+            type: "outfits",
+            outfits: res.outfits,
+            trace: res.trace,
+            selectedOutfitRank: null,
+          },
+        };
+
+        setMessages((prev) => [...prev, newMsg]);
+        setSuggestedChips([
+          "今日これを着る",
+          "🔥 眠っている服を優先",
+          "👟 靴だけ変える",
+          "🧥 アウターを変える",
+          "🥶 少し暖かくする",
+          "📷 服を追加する",
+        ]);
+        scrollToBottom();
+      } catch (err) {
+        setErrorMsg(err instanceof Error ? err.message : "コーディネート計算に失敗しました。");
       } finally {
-        setLoading(false);
+        setIsLoading(false);
       }
     },
     []
   );
 
+  // 初回起動時のデータ取得 & 自動ウェルカム提案
   useEffect(() => {
     (async () => {
       try {
+        setIsLoading(true);
         const ctx = await fetchDemoContext();
         setWardrobe(ctx.wardrobe);
         setPresets(ctx.presets);
+
         if (ctx.presets.length > 0) {
           const first = ctx.presets[0];
           setSelectedPresetId(first.id);
           setWeather(first.weather);
           setEvents(first.events);
           setProfile(first.profile);
-          await runRecommendation(
+
+          // 1. 朝のブリーフィングカードを投稿
+          const briefingMsg: ChatMessage = {
+            id: `msg_briefing_${Date.now()}`,
+            sender: "assistant",
+            timestamp: getNowTime(),
+            text: `Closet Me へようこそ！今日の予定と天候を読み込みました。`,
+            attachment: {
+              type: "briefing",
+              weather: first.weather,
+              events: first.events,
+            },
+          };
+          setMessages([briefingMsg]);
+
+          // 2. 本日の3コーデ提案を自動生成
+          await executeRecommendation(
             first.weather,
             first.events,
             first.profile,
             ctx.wardrobe,
-            []
+            [],
+            `本日の予定（${first.events.map((e) => e.title).join("・")}）に合わせた、熱的快適性と死蔵服復活を両立する3案です！`
           );
         }
-      } catch {
-        setErrorMsg(
-          "FastAPI バックエンドに接続できません。バックエンドが稼働しているか確認してください。"
-        );
-        setLoading(false);
+      } catch (err) {
+        setErrorMsg("バックエンド（Cloud Run / uvicorn）への接続に失敗しました。");
+      } finally {
+        setIsLoading(false);
       }
     })();
-  }, [runRecommendation]);
+  }, [executeRecommendation]);
 
+  // シナリオプリセット切替（1-Click 検証）
   const handleSelectPreset = async (presetId: string) => {
     const found = presets.find((p) => p.id === presetId);
     if (!found) return;
     setSelectedPresetId(found.id);
-    setGcalStatus("disconnected");
-    setGcalMessage(null);
     setWeather(found.weather);
     setEvents(found.events);
     setProfile(found.profile);
-    await runRecommendation(
+    setGcalStatus("disconnected");
+
+    const userSwitchMsg: ChatMessage = {
+      id: `usr_${Date.now()}`,
+      sender: "user",
+      timestamp: getNowTime(),
+      text: `検証シナリオを切り替え: ${found.label}`,
+    };
+
+    setMessages((prev) => [...prev, userSwitchMsg]);
+    await executeRecommendation(
       found.weather,
       found.events,
       found.profile,
       wardrobe,
-      recentWornIds
+      recentWornIds,
+      `シナリオを「${found.label}」に切り替えました。寒暖差や活動量（METs）に合わせてClo値とフォーマル度を即座に再計算しました。`
     );
   };
 
-  const handleConnectGoogleCalendar = async (forceDemo: boolean = false) => {
-    setIsGCalLoading(true);
-    setGcalMessage(null);
+  // ユーザーの自由テキスト送信処理（Tier 0 / Tier 1 / Tier 2）
+  const handleUserSendMessage = async (text: string) => {
+    const time = getNowTime();
+    const userMsg: ChatMessage = {
+      id: `usr_${Date.now()}`,
+      sender: "user",
+      timestamp: time,
+      text,
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    scrollToBottom();
+
+    setIsLoading(true);
     try {
-      if (!forceDemo && isGoogleAuthAvailable()) {
-        const token = await getGoogleCalendarAccessToken();
-        const fetchedEvents = await fetchGoogleCalendarEvents(token);
-        if (fetchedEvents.length === 0) {
-          setGcalMessage("本日のGoogleカレンダーの予定は0件でした。快適なリラックス服を提案します。");
-        } else {
-          setGcalMessage(`Google カレンダーから本日の予定（${fetchedEvents.length}件）を取得しました。`);
-        }
-        setEvents(fetchedEvents);
-        setGcalStatus("connected_real");
+      const intentRes = await interpretChatMessage({
+        message: text,
+        context: {
+          location_name: weather?.location_name || "東京・渋谷",
+          cold_sensitivity: profile.cold_sensitivity,
+          events_count: events.length,
+          has_active_outfit: latestOutfits.length > 0,
+          preferred_styles: profile.preferred_styles,
+        },
+      });
+
+      // 意図に応じたアクション分岐
+      if (intentRes.intent === "add_clothing_text" && intentRes.clothing_draft) {
+        // テキストからの服追加ドラフト
+        const draftMsg: ChatMessage = {
+          id: `ast_${Date.now()}`,
+          sender: "assistant",
+          timestamp: getNowTime(),
+          text: intentRes.assistant_message,
+          attachment: {
+            type: "clothing_draft",
+            draft: intentRes.clothing_draft,
+          },
+          suggestedChips: intentRes.suggested_chips,
+        };
+        setMessages((prev) => [...prev, draftMsg]);
+      } else if (intentRes.intent === "swap_item" && intentRes.target_category) {
+        // アイテム部分入れ替え
+        await handleOpenSwapModal(1, intentRes.target_category, latestOutfits[0]?.item_ids || []);
+      } else if (intentRes.intent === "update_weather" && intentRes.location_query) {
+        // 天気都市変更
+        const newWeather = await lookupWeather(intentRes.location_query);
+        setWeather(newWeather);
         if (weather) {
-          await runRecommendation(weather, fetchedEvents, profile, wardrobe, recentWornIds);
+          await executeRecommendation(
+            newWeather,
+            events,
+            profile,
+            wardrobe,
+            recentWornIds,
+            `${intentRes.location_query}の最新天気に更新しました！実効気温に合わせた新しい提案です。`
+          );
+        }
+      } else if (intentRes.intent === "update_sensitivity" && intentRes.cold_sensitivity !== undefined && intentRes.cold_sensitivity !== null) {
+        // 寒がり/暑がり変更
+        const nextProf = { ...profile, cold_sensitivity: intentRes.cold_sensitivity };
+        setProfile(nextProf);
+        if (weather) {
+          await executeRecommendation(
+            weather,
+            events,
+            nextProf,
+            wardrobe,
+            recentWornIds,
+            intentRes.assistant_message
+          );
+        }
+      } else if (intentRes.intent === "search_wardrobe" && intentRes.search_query) {
+        // 1408次元ベクトル検索
+        const searchResults = await searchWardrobeCrossModal({
+          query: intentRes.search_query,
+          wardrobe,
+        });
+        const searchMsg: ChatMessage = {
+          id: `ast_${Date.now()}`,
+          sender: "assistant",
+          timestamp: getNowTime(),
+          text: intentRes.assistant_message,
+          attachment: {
+            type: "search_results",
+            query: intentRes.search_query,
+            results: searchResults,
+          },
+          suggestedChips: intentRes.suggested_chips,
+        };
+        setMessages((prev) => [...prev, searchMsg]);
+      } else if (intentRes.intent === "open_closet") {
+        setIsClosetDrawerOpen(true);
+        const replyMsg: ChatMessage = {
+          id: `ast_${Date.now()}`,
+          sender: "assistant",
+          timestamp: getNowTime(),
+          text: intentRes.assistant_message,
+          suggestedChips: intentRes.suggested_chips,
+        };
+        setMessages((prev) => [...prev, replyMsg]);
+      } else if (intentRes.intent === "recommend") {
+        // 再推薦
+        const nextProf = intentRes.preferred_styles
+          ? { ...profile, preferred_styles: intentRes.preferred_styles }
+          : profile;
+        setProfile(nextProf);
+        if (weather) {
+          await executeRecommendation(
+            weather,
+            events,
+            nextProf,
+            wardrobe,
+            recentWornIds,
+            intentRes.assistant_message
+          );
         }
       } else {
-        // スマートデモモード（または Client ID 未設定時の1クリック検証）
-        const demoEvents = getSimulatedGoogleEvents();
-        setEvents(demoEvents);
-        setGcalStatus("connected_demo");
-        setGcalMessage("【デモ連携】Google カレンダーから本日の予定（4件: Meet/出社商談/移動/会食）を同期しました。");
-        if (weather) {
-          await runRecommendation(weather, demoEvents, profile, wardrobe, recentWornIds);
-        }
+        // 一般返答
+        const generalMsg: ChatMessage = {
+          id: `ast_${Date.now()}`,
+          sender: "assistant",
+          timestamp: getNowTime(),
+          text: intentRes.assistant_message,
+          suggestedChips: intentRes.suggested_chips,
+        };
+        setMessages((prev) => [...prev, generalMsg]);
+      }
+
+      if (intentRes.suggested_chips && intentRes.suggested_chips.length > 0) {
+        setSuggestedChips(intentRes.suggested_chips);
       }
     } catch (err) {
-      console.warn("Google Calendar connection notice:", err);
-      // 万一のOAuthポップアップブロックやエラー時はデモ連携をフォールバックとして提案
-      setGcalMessage(
-        err instanceof Error
-          ? `Google 認証エラー: ${err.message}`
-          : "Google カレンダー連携に失敗しました。"
-      );
+      setErrorMsg("対話の解析に失敗しました。");
     } finally {
-      setIsGCalLoading(false);
+      setIsLoading(false);
+      scrollToBottom();
     }
   };
 
-  const handleDisconnectGoogleCalendar = async () => {
-    setGcalStatus("disconnected");
-    setGcalMessage(null);
-    const preset = presets.find((p) => p.id === selectedPresetId) || presets[0];
-    if (preset) {
-      setEvents(preset.events);
-      if (weather) {
-        await runRecommendation(weather, preset.events, profile, wardrobe, recentWornIds);
+  // 選択肢チップのタップ（Tier 0: LLMコスト0円で直結実行）
+  const handleSelectChip = async (chipText: string) => {
+    if (chipText.includes("今日これを着る")) {
+      if (latestOutfits.length > 0) {
+        await handleWearOutfit(latestOutfits[0]);
       }
+      return;
     }
+    if (chipText.includes("眠っている服")) {
+      handleUserSendMessage("眠っている死蔵服を優先してコーデ組んで");
+      return;
+    }
+    if (chipText.includes("靴だけ変える") || chipText.includes("スニーカー") || chipText.includes("ローファー")) {
+      handleUserSendMessage("靴を変えたい");
+      return;
+    }
+    if (chipText.includes("アウターを変える") || chipText.includes("コート")) {
+      handleUserSendMessage("アウターを変えたい");
+      return;
+    }
+    if (chipText.includes("少し暖かく") || chipText.includes("寒がり")) {
+      handleUserSendMessage("寒がりなので暖かくして");
+      return;
+    }
+    if (chipText.includes("服を登録") || chipText.includes("服を追加")) {
+      const msg: ChatMessage = {
+        id: `ast_${Date.now()}`,
+        sender: "assistant",
+        timestamp: getNowTime(),
+        text: "下のカメラボタン 📷 から服の写真を送るか、「黒のタートルネックニット追加」「撥水のローファー買った」のようにテキストを送っていただければ、被服気候学属性を抽出して登録できます！",
+        suggestedChips: ["📷 写真を選択する", "黒のニットを追加", "撥水の靴を追加"],
+      };
+      setMessages((prev) => [...prev, msg]);
+      scrollToBottom();
+      return;
+    }
+    if (chipText.includes("カレンダー連携")) {
+      setIsContextDrawerOpen(true);
+      return;
+    }
+    if (chipText.includes("クローゼット")) {
+      setIsClosetDrawerOpen(true);
+      return;
+    }
+    // その他のチップはそのまま自然言語として送信
+    handleUserSendMessage(chipText);
   };
 
-  const handleCitySelect = async (cityName: string) => {
-    setWeatherLoading(true);
-    setIsChangingCity(false);
-    try {
-      const newWeather = await lookupWeather(cityName);
-      setWeather(newWeather);
-      if (events) {
-        await runRecommendation(newWeather, events, profile, wardrobe, recentWornIds);
-      }
-    } catch {
-      setErrorMsg("地域の気象データ取得に失敗しました。");
-    } finally {
-      setWeatherLoading(false);
-    }
-  };
+  // 写真アップロード処理（チャットから手持ち服登録）
+  const handleSendPhoto = async (file: File) => {
+    const previewUrl = URL.createObjectURL(file);
+    const time = getNowTime();
 
-  const handleAddCustomEvent = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newEvent.title.trim()) return;
-
-    const added: RawCalendarEvent = {
-      title: newEvent.title.trim(),
-      start_time: newEvent.start_time,
-      end_time: newEvent.end_time,
-      location: newEvent.location.trim() || undefined,
+    const userPhotoMsg: ChatMessage = {
+      id: `usr_${Date.now()}`,
+      sender: "user",
+      timestamp: time,
+      text: "服の写真を送信しました",
+      imageUrl: previewUrl,
     };
-    const updatedEvents = [...events, added].sort((a, b) =>
-      a.start_time.localeCompare(b.start_time)
-    );
-    setEvents(updatedEvents);
-    setIsAddingEvent(false);
-    setNewEvent({ title: "", start_time: "14:00", end_time: "16:00", location: "" });
+    setMessages((prev) => [...prev, userPhotoMsg]);
+    scrollToBottom();
 
-    if (weather) {
-      await runRecommendation(weather, updatedEvents, profile, wardrobe, recentWornIds);
-    }
-  };
-
-  const handleDeleteEvent = async (index: number) => {
-    const updated = events.filter((_, i) => i !== index);
-    setEvents(updated);
-    if (weather) {
-      await runRecommendation(weather, updated, profile, wardrobe, recentWornIds);
-    }
-  };
-
-  // 【新機能1】Vertex AI クロスモーダル検索の実行
-  const handleCrossModalSearch = async (queryText: string) => {
-    if (!queryText.trim()) return;
-    setSearchingCrossModal(true);
-    setCrossModalQuery(queryText);
+    setIsLoading(true);
     try {
-      const results = await searchWardrobeCrossModal({
-        query: queryText,
-        wardrobe,
-      });
-      setCrossModalResults(results);
-    } catch {
-      setErrorMsg("クロスモーダル検索に失敗しました。");
+      const analyzed = await analyzeClothingPhoto(file);
+      const draftMsg: ChatMessage = {
+        id: `ast_draft_${Date.now()}`,
+        sender: "assistant",
+        timestamp: getNowTime(),
+        text: `「${analyzed.suggested_name}」（${CATEGORY_LABELS[analyzed.category]} / ${analyzed.clo_value} Clo）をマルチモーダル解析しました！内容を確認してクローゼットに登録してください。`,
+        attachment: {
+          type: "clothing_draft",
+          draft: analyzed,
+          imageUrl: previewUrl,
+        },
+        suggestedChips: ["✨ クローゼットに登録", "別の写真を送る", "今日のコーデに戻る"],
+      };
+      setMessages((prev) => [...prev, draftMsg]);
+    } catch (err) {
+      setErrorMsg("写真の解析に失敗しました。");
     } finally {
-      setSearchingCrossModal(false);
+      setIsLoading(false);
+      scrollToBottom();
     }
   };
 
-  const handleClearCrossModal = () => {
-    setCrossModalQuery("");
-    setCrossModalResults(null);
+  // ドラフト服の確定登録処理
+  const handleConfirmAddClothing = async (draft: AnalyzeClothingResponse, imageUrl?: string | null) => {
+    const newItem: ClothingItem = {
+      id: `item_${Date.now()}`,
+      name: draft.suggested_name,
+      category: draft.category,
+      subtype: draft.subtype,
+      colors: draft.colors,
+      formality: draft.formality,
+      clo_value: draft.clo_value,
+      water_resistant: draft.water_resistant,
+      wear_count: 0,
+      days_since_last_worn: 30, // 即座に新着・死蔵ブースト対象に
+      availability: "available",
+      image_url: imageUrl || null,
+      style_tags: draft.style_tags,
+    };
+
+    const updated = [newItem, ...wardrobe];
+    setWardrobe(updated);
+
+    const time = getNowTime();
+    const confirmedMsg: ChatMessage = {
+      id: `ast_${Date.now()}`,
+      sender: "assistant",
+      timestamp: time,
+      text: `🎉「${newItem.name}」をクローゼットに追加しました！（手持ち服: 全${updated.length}着）この服を組み込んだ新しいコーディネートを計算します。`,
+    };
+    setMessages((prev) => [...prev, confirmedMsg]);
+
+    if (weather) {
+      await executeRecommendation(
+        weather,
+        events,
+        profile,
+        updated,
+        recentWornIds,
+        `追加された「${newItem.name}」を活かした新しい3つのコーディネート提案です！`
+      );
+    }
   };
 
-  // 【新機能2】被服気候学CSP連動アイテム部分入れ替えモーダルを開く
+  // アイテム部分入れ替え (Swap) モーダル/カード展開
   const handleOpenSwapModal = async (
     outfitRank: number,
     targetCategory: ClothingCategory,
     currentItemIds: string[]
   ) => {
-    if (!weather || !trace) return;
-    setSwapLoading(true);
+    if (!weather || !latestTrace) return;
+    setIsLoading(true);
     try {
       const candidates = await fetchSwapCandidates({
         target_category: targetCategory,
         current_item_ids: currentItemIds,
-        target_clo_min: trace.target_clo_min,
-        target_clo_max: trace.target_clo_max,
+        target_clo_min: latestTrace.target_clo_min,
+        target_clo_max: latestTrace.target_clo_max,
         weather,
         profile,
         wardrobe,
       });
-      setSwapModal({
-        outfitRank,
-        targetCategory,
-        currentItemIds,
-        candidates,
-      });
+
+      const swapMsg: ChatMessage = {
+        id: `swap_${Date.now()}`,
+        sender: "assistant",
+        timestamp: getNowTime(),
+        text: `【Option 0${outfitRank}】${CATEGORY_LABELS[targetCategory]}の差し替え候補です。被服気候学の目標断熱性（${latestTrace.target_clo_min}〜${latestTrace.target_clo_max} Clo）を崩さない手持ち服を厳選しました。`,
+        attachment: {
+          type: "swap_candidates",
+          targetCategory,
+          candidates,
+          outfitRank,
+        },
+      };
+      setMessages((prev) => [...prev, swapMsg]);
+      scrollToBottom();
     } catch {
-      setErrorMsg("差し替え候補の算出に失敗しました。");
+      setErrorMsg("差し替え候補の取得に失敗しました。");
     } finally {
-      setSwapLoading(false);
+      setIsLoading(false);
     }
   };
 
-  // 選択したアイテムで差し替え実行
-  const handleApplySwap = (newItem: ClothingItem) => {
-    if (!swapModal) return;
+  // 差し替えの適用
+  const handleApplySwap = (newItem: ClothingItem, outfitRank: number) => {
+    const target = latestOutfits.find((o) => o.rank === outfitRank);
+    if (!target) return;
 
-    const targetOutfit = outfits.find((o) => o.rank === swapModal.outfitRank);
-    if (!targetOutfit) return;
+    const newItems = target.items.map((i) => (i.category === newItem.category ? newItem : i));
+    if (!newItems.some((i) => i.category === newItem.category)) newItems.push(newItem);
 
-    // 既存のアイテム配列から同カテゴリのアイテムを差し替え
-    const newItems = targetOutfit.items.map((i) =>
-      i.category === swapModal.targetCategory ? newItem : i
-    );
-    // もし既存に該当カテゴリが無かった場合（例: アウターなしにアウター追加）
-    if (!targetOutfit.items.some((i) => i.category === swapModal.targetCategory)) {
-      newItems.push(newItem);
-    }
+    const newTotalClo = Math.round((newItems.reduce((acc, i) => acc + i.clo_value, 0.06)) * 100) / 100;
+    const revived = newItems.filter((i) => i.days_since_last_worn >= 30).map((i) => i.id);
 
-    const newItemIds = newItems.map((i) => i.id);
-    const newTotalClo = roundToTwo(newItems.reduce((acc, i) => acc + i.clo_value, 0.06));
-
-    const revived = newItems
-      .filter((i) => i.days_since_last_worn >= 30)
-      .map((i) => i.id);
-
-    // 提案データを動的に更新
-    const updatedOutfits = outfits.map((o) => {
-      if (o.rank !== swapModal.outfitRank) return o;
+    const updatedOutfits = latestOutfits.map((o) => {
+      if (o.rank !== outfitRank) return o;
       return {
         ...o,
-        item_ids: newItemIds,
+        item_ids: newItems.map((i) => i.id),
         items: newItems,
         total_clo: newTotalClo,
         revived_dormant_ids: revived,
         reason: `${newItem.name} にカスタム差し替え。熱的断熱性 ${newTotalClo} Clo で快適性を維持。`,
       };
     });
+    setLatestOutfits(updatedOutfits);
 
-    setOutfits(updatedOutfits);
-    setSwapModal(null);
-  };
-
-  const handleSensitivityChange = async (delta: number) => {
-    if (!weather) return;
-    const nextProfile: UserProfile = {
-      ...profile,
-      cold_sensitivity: delta,
+    const appliedMsg: ChatMessage = {
+      id: `ast_swap_${Date.now()}`,
+      sender: "assistant",
+      timestamp: getNowTime(),
+      text: `Option 0${outfitRank} を「${newItem.name}」に差し替えました！（合計 ${newTotalClo} Clo）`,
+      attachment: {
+        type: "outfits",
+        outfits: updatedOutfits,
+        trace: latestTrace,
+        selectedOutfitRank,
+      },
     };
-    setProfile(nextProfile);
-    await runRecommendation(weather, events, nextProfile, wardrobe, recentWornIds);
+    setMessages((prev) => [...prev, appliedMsg]);
+    scrollToBottom();
   };
 
-  const handleWearOutfit = (proposal: OutfitProposal) => {
+  // Google Calendar 着用コーデ書き込み
+  const handleWearOutfit = async (proposal: OutfitProposal) => {
     setSelectedOutfitRank(proposal.rank);
+    setIsCalendarSaving(true);
+
     const updatedWardrobe = wardrobe.map((item) =>
       proposal.item_ids.includes(item.id)
-        ? {
-            ...item,
-            wear_count: item.wear_count + 1,
-            days_since_last_worn: 0,
-          }
+        ? { ...item, wear_count: item.wear_count + 1, days_since_last_worn: 0 }
         : item
     );
     setWardrobe(updatedWardrobe);
     setRecentWornIds(proposal.item_ids);
+
+    const chosenItems = wardrobe.filter((i) => proposal.item_ids.includes(i.id));
+    const titleCore = chosenItems.map((i) => i.name).slice(0, 2).join(" × ");
+    const eventTitle = `👔 [Closet Me] ${titleCore}`;
+    const itemsSummaryText = chosenItems.map((i) => `${CATEGORY_LABELS[i.category]}: ${i.name}`).join(" / ");
+
+    const descriptionLines = [
+      "【着用アイテム】",
+      ...chosenItems.map((i) => `・${CATEGORY_LABELS[i.category]}: ${i.name} (${i.clo_value} Clo)`),
+      "",
+      `合計断熱性: ${proposal.total_clo} Clo`,
+      `推薦理由: ${proposal.reason}`,
+      proposal.weather_advice ? `気候助言: ${proposal.weather_advice}` : "",
+    ].filter(Boolean);
+
+    try {
+      if (gcalAccessToken) {
+        const res = await createGoogleCalendarOutfitEvent(gcalAccessToken, {
+          title: eventTitle,
+          itemsSummary: itemsSummaryText,
+          descriptionLines,
+        });
+        const savedMsg: ChatMessage = {
+          id: `ast_cal_${Date.now()}`,
+          sender: "assistant",
+          timestamp: getNowTime(),
+          text: `🎉 本日のコーディネート「${proposal.title}」を Google カレンダーに終日記録しました！`,
+          attachment: {
+            type: "calendar_saved",
+            title: eventTitle,
+            htmlLink: res.htmlLink,
+          },
+        };
+        setMessages((prev) => [...prev, savedMsg]);
+      } else {
+        const templateUrl = generateGoogleCalendarTemplateUrl({
+          title: eventTitle,
+          itemsSummary: itemsSummaryText,
+          descriptionLines,
+        });
+        const savedMsg: ChatMessage = {
+          id: `ast_cal_${Date.now()}`,
+          sender: "assistant",
+          timestamp: getNowTime(),
+          text: `🎉 本日のコーディネート「${proposal.title}」を記録しました！Googleカレンダー本体へも1クリックで追加できます。`,
+          attachment: {
+            type: "calendar_saved",
+            title: eventTitle,
+            templateUrl,
+          },
+        };
+        setMessages((prev) => [...prev, savedMsg]);
+      }
+    } catch {
+      setErrorMsg("カレンダーへの記録に失敗しました。");
+    } finally {
+      setIsCalendarSaving(false);
+      scrollToBottom();
+    }
   };
 
-  const handleToggleLaundry = async (itemId: string) => {
-    const updated = wardrobe.map((item) =>
-      item.id === itemId
-        ? {
-            ...item,
-            availability:
-              item.availability === "available"
-                ? ("laundry" as const)
-                : ("available" as const),
-          }
-        : item
+  // Google Calendar 接続
+  const handleConnectGoogleCalendar = async (forceDemo: boolean = false) => {
+    setIsGCalLoading(true);
+    try {
+      if (!forceDemo && isGoogleAuthAvailable()) {
+        const token = await getGoogleCalendarAccessToken();
+        setGcalAccessToken(token);
+        const evs = await fetchGoogleCalendarEvents(token);
+        setEvents(evs);
+        setGcalStatus("connected_real");
+        if (weather) {
+          await executeRecommendation(weather, evs, profile, wardrobe, recentWornIds, "Google カレンダーの本番予定を同期しました！");
+        }
+      } else {
+        const demoEvs = getSimulatedGoogleEvents();
+        setEvents(demoEvs);
+        setGcalStatus("connected_demo");
+        if (weather) {
+          await executeRecommendation(weather, demoEvs, profile, wardrobe, recentWornIds, "【デモ連携】Google カレンダーから本日の予定（4件）を同期しました。");
+        }
+      }
+    } catch {
+      setErrorMsg("Google カレンダー連携に失敗しました。");
+    } finally {
+      setIsGCalLoading(false);
+    }
+  };
+
+  const handleDisconnectGoogleCalendar = () => {
+    setGcalStatus("disconnected");
+    setGcalAccessToken(null);
+    const preset = presets.find((p) => p.id === selectedPresetId) || presets[0];
+    if (preset) {
+      setEvents(preset.events);
+      if (weather) executeRecommendation(weather, preset.events, profile, wardrobe, recentWornIds);
+    }
+  };
+
+  const handleToggleLaundry = (itemId: string) => {
+    const updated = wardrobe.map((i) =>
+      i.id === itemId
+        ? { ...i, availability: (i.availability === "available" ? "laundry" : "available") as "available" | "laundry" }
+        : i
     );
     setWardrobe(updated);
-    if (weather) {
-      await runRecommendation(weather, events, profile, updated, recentWornIds);
-    }
+    if (weather) executeRecommendation(weather, events, profile, updated, recentWornIds);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-
-    // 即時ローカルプレビュー作成
-    const previewUrl = URL.createObjectURL(file);
-    setPreviewPhotoUrl(previewUrl);
-
-    setAnalyzingPhoto(true);
-    try {
-      const result = await analyzeClothingPhoto(file);
-      setAnalyzedDraft(result);
-    } catch (err) {
-      setErrorMsg(
-        err instanceof Error ? err.message : "画像解析に失敗しました。"
-      );
-    } finally {
-      setAnalyzingPhoto(false);
-    }
-  };
-
-  const handleConfirmAddClothing = async () => {
-    if (!analyzedDraft) return;
-    const newItem: ClothingItem = {
-      id: `custom_${Date.now()}`,
-      name: analyzedDraft.suggested_name,
-      category: analyzedDraft.category,
-      subtype: analyzedDraft.subtype,
-      colors: analyzedDraft.colors,
-      formality: analyzedDraft.formality,
-      clo_value: analyzedDraft.clo_value,
-      water_resistant: analyzedDraft.water_resistant,
-      wear_count: 0,
-      days_since_last_worn: 45, // 新規・未活用枠として即提案候補に
-      availability: "available",
-      image_url: previewPhotoUrl,
-      style_tags: analyzedDraft.style_tags,
-    };
-    const updated = [newItem, ...wardrobe];
-    setWardrobe(updated);
-    setAnalyzedDraft(null);
-    setPreviewPhotoUrl(null);
-    if (weather) {
-      await runRecommendation(weather, events, profile, updated, recentWornIds);
-    }
-    setActiveTab("today");
-  };
-
-  const dormantCount = useMemo(
-    () => wardrobe.filter((i) => i.days_since_last_worn >= 30).length,
-    [wardrobe]
-  );
   const utilizationRate = useMemo(() => {
     if (wardrobe.length === 0) return 0;
-    return Math.round(((wardrobe.length - dormantCount) / wardrobe.length) * 100);
-  }, [wardrobe, dormantCount]);
-
-  const crossModalMap = useMemo(() => {
-    if (!crossModalResults) return null;
-    const map = new Map<string, CrossModalSearchResult>();
-    for (const r of crossModalResults) {
-      map.set(r.item.id, r);
-    }
-    return map;
-  }, [crossModalResults]);
-
-  const filteredWardrobe = useMemo(() => {
-    let list = [...wardrobe];
-    // クロスモーダル検索結果がある場合は類似度降順に並べ替え
-    if (crossModalResults && crossModalResults.length > 0) {
-      const orderMap = new Map<string, number>();
-      crossModalResults.forEach((r, idx) => orderMap.set(r.item.id, idx));
-      list.sort((a, b) => (orderMap.get(a.id) ?? 999) - (orderMap.get(b.id) ?? 999));
-    }
-
-    return list.filter((item) => {
-      if (selectedCategory !== "all" && item.category !== selectedCategory) {
-        return false;
-      }
-      if (filterDormantOnly && item.days_since_last_worn < 30) {
-        return false;
-      }
-      return true;
-    });
-  }, [wardrobe, selectedCategory, filterDormantOnly, crossModalResults]);
+    const dormant = wardrobe.filter((i) => i.days_since_last_worn >= 30).length;
+    return Math.round(((wardrobe.length - dormant) / wardrobe.length) * 100);
+  }, [wardrobe]);
 
   return (
-    <div className="min-h-screen bg-[#FAF9F6] text-zinc-900 pb-20 font-sans selection:bg-zinc-900 selection:text-white">
-      {/* Header */}
-      <header className="sticky top-0 z-30 border-b border-zinc-200/80 bg-white/90 backdrop-blur-md">
-        <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-zinc-900 text-white shadow-sm">
-              <Sparkles className="h-5 w-5" />
+    <div className="flex flex-col min-h-screen bg-[#FAF9F6] text-zinc-900 font-sans selection:bg-zinc-900 selection:text-white">
+      {/* Top Header */}
+      <header className="sticky top-0 z-30 border-b border-zinc-200/80 bg-white/95 backdrop-blur-md">
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3">
+          {/* Logo & Subtitle */}
+          <div className="flex items-center gap-2.5">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-zinc-900 text-white shadow-xs">
+              <Sparkles className="h-4.5 w-4.5 text-amber-300" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-base font-bold tracking-tight">Closet Me</h1>
-                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-semibold text-zinc-600">
+                <h1 className="text-sm sm:text-base font-bold tracking-tight">Closet Me</h1>
+                <span className="rounded-full bg-zinc-100 px-2 py-0.2 text-[10px] font-bold text-zinc-600">
                   DevFest 2026
                 </span>
               </div>
-              <p className="text-[11px] text-zinc-500">
+              <p className="text-[10px] text-zinc-500 hidden sm:block">
                 被服気候学(Clo値) × Vertex AI パーソナルスタイリスト
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2.5">
-            <div className="hidden sm:flex flex-col items-end mr-1">
-              <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700">
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                <span>クローゼット稼働率 {utilizationRate}%</span>
-              </div>
-              <div className="w-24 h-1.5 bg-emerald-100 rounded-full mt-1 overflow-hidden">
-                <div
-                  className="h-full bg-emerald-600 rounded-full transition-all duration-500"
-                  style={{ width: `${utilizationRate}%` }}
-                />
-              </div>
+          {/* Header Action Buttons */}
+          <div className="flex items-center gap-2">
+            {/* 稼働率バッジ */}
+            <div
+              onClick={() => setIsClosetDrawerOpen(true)}
+              className="hidden sm:flex items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50/80 px-2.5 py-1 text-xs font-bold text-emerald-800 cursor-pointer hover:bg-emerald-100 transition"
+              title="クローゼット一覧を開く"
+            >
+              <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
+              <span>稼働率 {utilizationRate}%</span>
             </div>
 
-            <div className="flex rounded-xl bg-zinc-100 p-1">
-              <button
-                onClick={() => setActiveTab("today")}
-                className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
-                  activeTab === "today"
-                    ? "bg-white text-zinc-900 shadow-xs"
-                    : "text-zinc-600 hover:text-zinc-900"
-                }`}
-              >
-                本日の提案
-              </button>
-              <button
-                onClick={() => setActiveTab("closet")}
-                className={`rounded-lg px-3.5 py-1.5 text-xs font-semibold transition ${
-                  activeTab === "closet"
-                    ? "bg-white text-zinc-900 shadow-xs"
-                    : "text-zinc-600 hover:text-zinc-900"
-                }`}
-              >
-                手持ち服 ({wardrobe.length})
-              </button>
-            </div>
+            {/* 天気・予定ピル */}
+            <button
+              onClick={() => setIsContextDrawerOpen(true)}
+              className="flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-700 hover:border-zinc-400 transition"
+            >
+              <MapPin className="h-3.5 w-3.5 text-zinc-500" />
+              <span className="max-w-[70px] sm:max-w-none truncate">{weather?.location_name || "地域未設定"}</span>
+              <span className="text-zinc-400">|</span>
+              <Calendar className="h-3.5 w-3.5 text-indigo-600" />
+              <span>{events.length}件</span>
+            </button>
+
+            {/* 手持ち服ドロワーボタン */}
+            <button
+              onClick={() => setIsClosetDrawerOpen(true)}
+              className="flex items-center gap-1 rounded-xl bg-zinc-100 hover:bg-zinc-200 px-2.5 py-1 text-xs font-bold text-zinc-800 transition"
+            >
+              <Shirt className="h-3.5 w-3.5 text-zinc-600" />
+              <span>服 ({wardrobe.length})</span>
+            </button>
           </div>
         </div>
-      </header>
 
-      <main className="mx-auto max-w-5xl px-4 pt-5 space-y-6">
-        {/* 1-Click Demo Scenarios */}
+        {/* 1-Click 検証シナリオバー */}
         {presets.length > 0 && (
-          <section className="rounded-2xl border border-zinc-200/90 bg-white p-3.5 shadow-2xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-              <div className="flex items-center gap-2 text-xs font-semibold text-zinc-700">
-                <span className="rounded-lg bg-amber-100 px-2 py-0.5 text-amber-900 font-bold">
-                  1-Click デモ検証
-                </span>
-                <span>予定・気象シナリオ切替で推論の変化を即座に比較:</span>
-              </div>
+          <div className="border-t border-zinc-100 bg-zinc-50/70 px-3 py-1.5 sm:px-4">
+            <div className="mx-auto max-w-4xl flex items-center justify-between gap-2 text-xs">
+              <span className="font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded text-[10px] shrink-0">
+                1-Click デモ検証
+              </span>
               <select
                 value={selectedPresetId}
                 onChange={(e) => handleSelectPreset(e.target.value)}
-                className="rounded-xl border border-zinc-300 bg-zinc-50 px-3 py-1.5 text-xs font-medium text-zinc-800 focus:border-zinc-900 focus:outline-none transition cursor-pointer"
+                className="flex-1 max-w-md rounded-lg border border-zinc-300 bg-white px-2 py-0.8 text-xs font-medium text-zinc-800 focus:outline-none cursor-pointer truncate"
               >
                 {presets.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -631,1138 +798,163 @@ export default function ClosetMeApp() {
                 ))}
               </select>
             </div>
-          </section>
+          </div>
         )}
+      </header>
 
-        {errorMsg && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-xs text-red-700 flex items-center justify-between">
+      {/* エラーバナー */}
+      {errorMsg && (
+        <div className="mx-auto max-w-4xl px-3 pt-2 w-full">
+          <div className="flex items-center justify-between rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
             <span>{errorMsg}</span>
             <button onClick={() => setErrorMsg(null)} className="p-1 hover:bg-red-100 rounded">
-              <X className="h-4 w-4" />
+              <X className="h-3.5 w-3.5" />
             </button>
           </div>
-        )}
+        </div>
+      )}
 
-        {activeTab === "today" ? (
-          <>
-            {/* Context Grid: Google Maps Weather + Google Calendar */}
-            {weather && (
-              <div className="grid gap-4 md:grid-cols-2">
-                {/* Weather Card (Google Maps Platform Weather API) */}
-                <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xs flex flex-col justify-between">
-                  <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-zinc-600">
-                        {weather.rain_probability >= 0.5 ? (
-                          <CloudRain className="h-4 w-4 text-blue-600" />
-                        ) : (
-                          <Sun className="h-4 w-4 text-amber-500" />
-                        )}
-                        <span className="tracking-wide">Google Maps Platform Weather</span>
-                      </div>
-                      <button
-                        onClick={() => setIsChangingCity(!isChangingCity)}
-                        className="flex items-center gap-1 rounded-lg bg-zinc-100 hover:bg-zinc-200 px-2 py-1 text-[11px] font-medium text-zinc-700 transition"
-                      >
-                        <MapPin className="h-3 w-3 text-zinc-500" />
-                        <span>{weather.location_name}</span>
-                        <ChevronRight className="h-3 w-3" />
-                      </button>
-                    </div>
-
-                    {/* 都市選択ドロップダウン / 検索バー */}
-                    {isChangingCity && (
-                      <div className="mb-4 rounded-xl border border-zinc-200 bg-zinc-50 p-3 text-xs space-y-2">
-                        <p className="font-semibold text-zinc-700 text-[11px]">
-                          天気を取得する都市を選択:
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                          {POPULAR_CITIES.map((city) => (
-                            <button
-                              key={city}
-                              onClick={() => handleCitySelect(city)}
-                              className="rounded-lg bg-white border border-zinc-200 px-2 py-1 text-[11px] text-zinc-700 hover:border-zinc-900 transition"
-                            >
-                              {city}
-                            </button>
-                          ))}
-                        </div>
-                        <div className="flex gap-2 pt-1">
-                          <input
-                            type="text"
-                            placeholder="自由入力（例: 名古屋、金沢など）"
-                            value={customCityInput}
-                            onChange={(e) => setCustomCityInput(e.target.value)}
-                            className="flex-1 rounded-lg border border-zinc-300 bg-white px-2.5 py-1 text-xs focus:outline-none focus:border-zinc-900"
-                          />
-                          <button
-                            onClick={() => {
-                              if (customCityInput.trim()) {
-                                handleCitySelect(customCityInput.trim());
-                                setCustomCityInput("");
-                              }
-                            }}
-                            className="rounded-lg bg-zinc-900 px-3 py-1 text-xs font-bold text-white hover:bg-zinc-800"
-                          >
-                            変更
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-between my-2">
-                      <span className="text-sm font-bold text-zinc-900">
-                        {weather.condition_label}
-                      </span>
-                      {weatherLoading && (
-                        <span className="flex items-center gap-1 text-[11px] text-zinc-400">
-                          <RefreshCw className="h-3 w-3 animate-spin" /> 気象取得中...
-                        </span>
-                      )}
-                    </div>
-
-                    {/* 時間帯別気温グラフィックス */}
-                    <div className="grid grid-cols-3 gap-2 text-center my-3">
-                      <div className="rounded-xl bg-gradient-to-b from-sky-50 to-zinc-50 p-2.5 border border-sky-100/60">
-                        <p className="text-[11px] text-zinc-500 font-medium">朝 (08:00)</p>
-                        <p className="text-lg font-bold text-sky-950">{weather.morning_temp_c}℃</p>
-                      </div>
-                      <div className="rounded-xl bg-gradient-to-b from-amber-50 to-zinc-50 p-2.5 border border-amber-100/60">
-                        <p className="text-[11px] text-zinc-500 font-medium">昼 (14:00)</p>
-                        <p className="text-lg font-bold text-amber-950">{weather.afternoon_temp_c}℃</p>
-                      </div>
-                      <div className="rounded-xl bg-gradient-to-b from-indigo-50 to-zinc-50 p-2.5 border border-indigo-100/60">
-                        <p className="text-[11px] text-zinc-500 font-medium">夜 (20:00)</p>
-                        <p className="text-lg font-bold text-indigo-950">{weather.evening_temp_c}℃</p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between text-xs text-zinc-600 pt-3 border-t border-zinc-100">
-                    <span className="flex items-center gap-1">
-                      <Wind className="h-3.5 w-3.5" /> 風速 {weather.wind_speed_ms} m/s
-                    </span>
-                    <span className="flex items-center gap-1 font-medium">
-                      降水確率 {Math.round(weather.rain_probability * 100)}%
-                    </span>
-                    <div className="flex items-center gap-1">
-                      <Thermometer className="h-3.5 w-3.5 text-zinc-400" />
-                      {(
-                        [
-                          { val: -1, label: "暑がり" },
-                          { val: 0, label: "標準" },
-                          { val: 1, label: "寒がり" },
-                        ] as const
-                      ).map((opt) => (
-                        <button
-                          key={opt.val}
-                          onClick={() => handleSensitivityChange(opt.val)}
-                          className={`rounded px-1.5 py-0.5 text-[10px] transition ${
-                            profile.cold_sensitivity === opt.val
-                              ? "bg-zinc-900 text-white font-semibold"
-                              : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200"
-                          }`}
-                        >
-                          {opt.label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {/* Google Calendar Card (本番OAuth & 1-Click デモ同期・予定編集) */}
-                <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xs flex flex-col justify-between">
-                  <div>
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3">
-                      <div className="flex items-center gap-2">
-                        <Calendar className="h-4 w-4 text-indigo-600" />
-                        <span className="text-xs font-bold text-zinc-800 tracking-wide">
-                          Google Calendar 連携
-                        </span>
-                        {gcalStatus === "connected_real" && (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 text-emerald-800 px-2.5 py-0.5 text-[10px] font-semibold">
-                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
-                            本番カレンダー同期中
-                          </span>
-                        )}
-                        {gcalStatus === "connected_demo" && (
-                          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 text-blue-800 px-2.5 py-0.5 text-[10px] font-semibold">
-                            <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
-                            カレンダー同期中（デモ）
-                          </span>
-                        )}
-                        {gcalStatus === "disconnected" && (
-                          <span className="inline-flex items-center rounded-full bg-zinc-100 text-zinc-600 px-2 py-0.5 text-[10px] font-medium">
-                            プリセット予定
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex items-center flex-wrap gap-2">
-                        <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
-                          <ShieldCheck className="h-3 w-3" /> PII サニタイズ済
-                        </span>
-
-                        {gcalStatus === "disconnected" ? (
-                          <button
-                            onClick={() => handleConnectGoogleCalendar(false)}
-                            disabled={isGCalLoading}
-                            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 text-[11px] font-bold shadow-xs transition disabled:opacity-50"
-                          >
-                            <RefreshCw
-                              className={`h-3 w-3 ${isGCalLoading ? "animate-spin" : ""}`}
-                            />
-                            <span>
-                              {isGoogleAuthAvailable()
-                                ? "Google カレンダーと連携"
-                                : "Google カレンダー連携（デモ同期）"}
-                            </span>
-                          </button>
-                        ) : (
-                          <div className="flex items-center gap-1.5">
-                            <button
-                              onClick={() =>
-                                handleConnectGoogleCalendar(gcalStatus === "connected_demo")
-                              }
-                              disabled={isGCalLoading}
-                              title="カレンダーを再同期"
-                              className="flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 transition"
-                            >
-                              <RefreshCw
-                                className={`h-3 w-3 ${isGCalLoading ? "animate-spin" : ""}`}
-                              />
-                              <span>再同期</span>
-                            </button>
-                            <button
-                              onClick={handleDisconnectGoogleCalendar}
-                              title="カレンダー連携を解除してプリセットに戻す"
-                              className="rounded-lg border border-zinc-200 px-2 py-1 text-[11px] font-medium text-zinc-500 hover:bg-zinc-100 transition"
-                            >
-                              解除
-                            </button>
-                          </div>
-                        )}
-
-                        <button
-                          onClick={() => setIsAddingEvent(!isAddingEvent)}
-                          className="flex items-center gap-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-white px-2 py-1 text-[11px] font-medium transition"
-                        >
-                          <Plus className="h-3 w-3" />
-                          <span>手動追加</span>
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* カレンダー連携通知バナー */}
-                    {gcalMessage && (
-                      <div className="mb-3 flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-[11px] text-indigo-900">
-                        <div className="flex items-center gap-1.5">
-                          <Sparkles className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
-                          <span>{gcalMessage}</span>
-                        </div>
-                        <button
-                          onClick={() => setGcalMessage(null)}
-                          className="text-indigo-400 hover:text-indigo-600 p-0.5 ml-2"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    )}
-
-                    {/* インライン予定追加フォーム */}
-                    {isAddingEvent && (
-                      <form
-                        onSubmit={handleAddCustomEvent}
-                        className="mb-3 rounded-xl border border-indigo-200 bg-indigo-50/50 p-3 text-xs space-y-2.5"
-                      >
-                        <p className="font-bold text-indigo-950 text-[11px] flex items-center gap-1">
-                          <CalendarPlus className="h-3.5 w-3.5" />
-                          新しい予定を追加（METs・TPOが即座に再計算されます）
-                        </p>
-                        <div className="grid grid-cols-2 gap-2">
-                          <div>
-                            <label className="text-[10px] text-zinc-500 block mb-0.5">開始時刻</label>
-                            <input
-                              type="time"
-                              value={newEvent.start_time}
-                              onChange={(e) =>
-                                setNewEvent({ ...newEvent, start_time: e.target.value })
-                              }
-                              className="w-full rounded-lg border border-zinc-300 bg-white px-2 py-1 text-xs"
-                            />
-                          </div>
-                          <div>
-                            <label className="text-[10px] text-zinc-500 block mb-0.5">終了時刻</label>
-                            <input
-                              type="time"
-                              value={newEvent.end_time}
-                              onChange={(e) =>
-                                setNewEvent({ ...newEvent, end_time: e.target.value })
-                              }
-                              className="w-full rounded-lg border border-zinc-300 bg-white px-2 py-1 text-xs"
-                            />
-                          </div>
-                        </div>
-                        <div>
-                          <input
-                            type="text"
-                            placeholder="予定名（例: 渋谷オフィスMTG、雨の中散歩）"
-                            value={newEvent.title}
-                            onChange={(e) => setNewEvent({ ...newEvent, title: e.target.value })}
-                            className="w-full rounded-lg border border-zinc-300 bg-white px-2.5 py-1 text-xs"
-                          />
-                        </div>
-                        <div className="flex justify-end gap-2">
-                          <button
-                            type="button"
-                            onClick={() => setIsAddingEvent(false)}
-                            className="rounded-lg px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-200"
-                          >
-                            キャンセル
-                          </button>
-                          <button
-                            type="submit"
-                            className="rounded-lg bg-indigo-700 px-3 py-1 text-xs font-bold text-white hover:bg-indigo-800"
-                          >
-                            追加して再計算
-                          </button>
-                        </div>
-                      </form>
-                    )}
-
-                    <div className="space-y-2">
-                      {events.map((ev, i) => {
-                        const sanitized = trace?.sanitized_activities[i];
-                        return (
-                          <div
-                            key={i}
-                            className="group flex items-center justify-between rounded-xl bg-zinc-50 hover:bg-zinc-100/80 px-3 py-2 text-xs transition"
-                          >
-                            <div className="flex items-center gap-2 min-w-0">
-                              <span className="font-mono text-zinc-400 text-[11px] shrink-0">
-                                {ev.start_time}-{ev.end_time}
-                              </span>
-                              <span className="font-semibold text-zinc-800 truncate">
-                                {ev.title}
-                              </span>
-                              {ev.location && (
-                                <span className="text-[10px] text-zinc-400 shrink-0">
-                                  @{ev.location}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-2 shrink-0 ml-2">
-                              {sanitized && (
-                                <span className="rounded-md bg-white border border-zinc-200 px-2 py-0.5 text-[10px] font-medium text-zinc-600">
-                                  {sanitized.activity_type} / {sanitized.estimated_mets} METs
-                                </span>
-                              )}
-                              <button
-                                onClick={() => handleDeleteEvent(i)}
-                                className="opacity-0 group-hover:opacity-100 p-1 text-zinc-400 hover:text-red-600 transition"
-                                title="予定を削除"
-                              >
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  <p className="text-[10px] text-zinc-400 pt-3 border-t border-zinc-100 mt-2">
-                    ※ Google Calendar の生データは外部・LLMへ直接送信されず、被服気候学エンジンで活動量(METs)と要求フォーマル度にサニタイズされた上で推論されます（Zero Raw PII Leakage）。
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {/* Outfit Proposals (3 Cards with Visual Photo Collage) */}
-            <section className="space-y-3.5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-lg font-bold tracking-tight flex items-center gap-2">
-                    <span>本日のベストコーディネート提案</span>
-                    {trace && (
-                      <span className="rounded-full bg-zinc-900 px-2.5 py-0.5 text-xs font-semibold text-white">
-                        目標断熱性 {trace.target_clo_min}〜{trace.target_clo_max} Clo
-                      </span>
-                    )}
-                  </h2>
-                  <p className="text-xs text-zinc-500 mt-0.5">
-                    被服気候学の数理制約を満たし、死蔵衣類と視覚調和を両立した上位3案
-                  </p>
-                </div>
-                {loading && (
-                  <span className="inline-flex items-center gap-1.5 text-xs text-zinc-500 font-medium">
-                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    最適化計算中...
-                  </span>
-                )}
-              </div>
-
-              <div className="grid gap-4 lg:grid-cols-3">
-                {outfits.map((outfit) => {
-                  const isChosen = selectedOutfitRank === outfit.rank;
-                  return (
-                    <div
-                      key={outfit.rank}
-                      className={`flex flex-col justify-between rounded-2xl border bg-white p-5 transition-all duration-200 shadow-2xs ${
-                        isChosen
-                          ? "border-zinc-900 ring-2 ring-zinc-900/10 shadow-md"
-                          : "border-zinc-200 hover:border-zinc-300"
-                      }`}
-                    >
-                      <div className="space-y-4">
-                        <div className="flex items-start justify-between gap-2">
-                          <div>
-                            <span className="text-[11px] font-bold uppercase tracking-wider text-zinc-400">
-                              Option 0{outfit.rank}
-                            </span>
-                            <h3 className="text-base font-bold text-zinc-900">
-                              {outfit.title}
-                            </h3>
-                          </div>
-                          <span className="shrink-0 rounded-lg bg-zinc-100 px-2.5 py-1 text-xs font-mono font-bold text-zinc-800">
-                            {outfit.total_clo} Clo
-                          </span>
-                        </div>
-
-                        {outfit.revived_dormant_ids.length > 0 && (
-                          <div className="flex items-center gap-1.5 rounded-xl bg-amber-50 border border-amber-200/80 px-3 py-1.5 text-xs font-bold text-amber-900">
-                            <Flame className="h-4 w-4 text-amber-600 shrink-0" />
-                            <span>眠っていた服（30日以上未着用）を再活用！</span>
-                          </div>
-                        )}
-
-                        {/* Visual Clothing Photo Collage (服の写真グリッド表示) */}
-                        <div className="grid grid-cols-2 gap-2">
-                          {outfit.items.map((item) => {
-                            const isDormant = outfit.revived_dormant_ids.includes(item.id);
-                            return (
-                              <div
-                                key={item.id}
-                                onClick={() => setSelectedItemDetail(item)}
-                                className="group relative flex flex-col overflow-hidden rounded-xl border border-zinc-200/80 bg-zinc-50 cursor-pointer hover:border-zinc-400 transition"
-                              >
-                                <div className="relative aspect-4/3 w-full bg-zinc-100 overflow-hidden">
-                                  {item.image_url ? (
-                                    <img
-                                      src={item.image_url}
-                                      alt={item.name}
-                                      className="h-full w-full object-cover group-hover:scale-105 transition duration-300"
-                                      loading="lazy"
-                                    />
-                                  ) : (
-                                    <div className="flex h-full w-full items-center justify-center text-zinc-300">
-                                      <Shirt className="h-8 w-8" />
-                                    </div>
-                                  )}
-                                  <span className="absolute top-1.5 left-1.5 rounded bg-black/60 backdrop-blur-xs px-1.5 py-0.5 text-[9px] font-bold text-white uppercase tracking-wider">
-                                    {CATEGORY_LABELS[item.category]}
-                                  </span>
-                                  {isDormant && (
-                                    <span className="absolute top-1.5 right-1.5 rounded bg-amber-500 px-1.5 py-0.5 text-[9px] font-bold text-white shadow-xs">
-                                      Revival
-                                    </span>
-                                  )}
-                                </div>
-
-                                <div className="p-2 flex flex-col justify-between flex-1">
-                                  <div>
-                                    <p className="text-[11px] font-bold text-zinc-900 truncate">
-                                      {item.name}
-                                    </p>
-                                    <div className="flex items-center justify-between text-[10px] text-zinc-500 mt-0.5">
-                                      <span>{item.colors[0]}</span>
-                                      <span className="font-mono font-semibold">{item.clo_value} Clo</span>
-                                    </div>
-                                  </div>
-                                  <button
-                                    onClick={(e) => {
-                                      e.stopPropagation();
-                                      handleOpenSwapModal(outfit.rank, item.category, outfit.item_ids);
-                                    }}
-                                    className="mt-1.5 flex items-center justify-center gap-1 w-full rounded-md bg-zinc-100 hover:bg-zinc-900 hover:text-white px-1.5 py-0.8 text-[10px] font-bold text-zinc-700 transition"
-                                  >
-                                    <ArrowLeftRight className="h-3 w-3" />
-                                    <span>入れ替え</span>
-                                  </button>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {/* Stylist Explanation */}
-                        <div className="space-y-2 rounded-xl bg-zinc-50 p-3.5 text-xs leading-relaxed text-zinc-700">
-                          <p>
-                            <strong className="text-zinc-900">推薦理由：</strong>
-                            {outfit.reason}
-                          </p>
-                          <p className="text-zinc-600 border-t border-zinc-200/70 pt-2">
-                            <strong className="text-zinc-800">気象アドバイス：</strong>
-                            {outfit.weather_advice}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 pt-3.5 border-t border-zinc-100 space-y-3">
-                        <div className="grid grid-cols-4 gap-1 text-center text-[10px] text-zinc-500">
-                          <div>
-                            <span className="block font-mono font-bold text-zinc-800">
-                              {Math.round(outfit.score_breakdown.physics_clo_fit * 100)}
-                            </span>
-                            物理断熱
-                          </div>
-                          <div>
-                            <span className="block font-mono font-bold text-zinc-800">
-                              {Math.round(outfit.score_breakdown.tpo_formality_fit * 100)}
-                            </span>
-                            TPO適合
-                          </div>
-                          <div>
-                            <span className="block font-mono font-bold text-zinc-800">
-                              {Math.round(outfit.score_breakdown.vector_style_similarity * 100)}
-                            </span>
-                            Vector調和
-                          </div>
-                          <div>
-                            <span className="block font-mono font-bold text-zinc-800">
-                              {Math.round(outfit.score_breakdown.dormancy_revival_score * 100)}
-                            </span>
-                            死蔵活用
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={() => handleWearOutfit(outfit)}
-                          className={`w-full rounded-xl py-2.5 text-xs font-bold transition flex items-center justify-center gap-1.5 ${
-                            isChosen
-                              ? "bg-emerald-600 text-white shadow-sm"
-                              : "bg-zinc-900 text-white hover:bg-zinc-800"
-                          }`}
-                        >
-                          {isChosen ? (
-                            <>
-                              <Check className="h-4 w-4" />
-                              <span>✓ 本日の着用コーデとして記録しました</span>
-                            </>
-                          ) : (
-                            "今日これを着る（着用履歴・稼働率を更新）"
-                          )}
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
-
-            {/* Own the Why: Pipeline Observability Trace (Cloud Logging連携) */}
-            {trace && (
-              <section className="rounded-2xl border border-zinc-200 bg-zinc-950 text-zinc-100 p-5">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-4 border-b border-zinc-800">
-                  <div className="flex items-center gap-2">
-                    <Cpu className="h-4 w-4 text-emerald-400" />
-                    <h3 className="text-sm font-bold">
-                      Own the Why — 3段階ハイブリッド推論トレース (Cloud Logging 構造化連携)
-                    </h3>
-                  </div>
-                  <span className="font-mono text-xs text-zinc-400">
-                    Engine: {trace.inference_engine} | {trace.latency_ms} ms
-                  </span>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-3 pt-4 text-xs">
-                  <div className="rounded-xl bg-zinc-900 p-3.5 border border-zinc-800">
-                    <p className="text-emerald-400 font-bold mb-1">
-                      Stage 1: 被服気候学 CSP 物理ソルバー
-                    </p>
-                    <p className="text-zinc-300 leading-relaxed">
-                      平均活動量 <strong>{trace.average_mets} METs</strong> と気温・風速から目標断熱性を{" "}
-                      <strong>
-                        {trace.target_clo_min}〜{trace.target_clo_max} Clo
-                      </strong>{" "}
-                      と算出。全 <strong>{trace.total_combinations_explored}通り</strong> から熱的・撥水制約を満たす{" "}
-                      <strong className="text-emerald-400">{trace.stage1_physics_passed}通り</strong> に絞り込み。
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-zinc-900 p-3.5 border border-zinc-800">
-                    <p className="text-sky-400 font-bold mb-1">
-                      Stage 2: Multimodal Vector × 死蔵衣類発掘
-                    </p>
-                    <p className="text-zinc-300 leading-relaxed">
-                      Vertex AI 1408次元スタイルベクトル類似度で調和を評価しつつ、30日以上未着用の服に{" "}
-                      <strong className="text-sky-400">Dormancy Revival Boost</strong> を付与して新しい着回しを発掘。
-                    </p>
-                  </div>
-
-                  <div className="rounded-xl bg-zinc-900 p-3.5 border border-zinc-800">
-                    <p className="text-amber-400 font-bold mb-1">
-                      Stage 3: Vertex AI Gemini 構造化リランカー
-                    </p>
-                    <p className="text-zinc-300 leading-relaxed">
-                      要求フォーマル度 (Lv.{trace.required_formality}) と色彩調和を多基準評価し、JSON Schema 検証・手持ちID実在チェックを通過した上位3案を出力。
-                    </p>
-                  </div>
-                </div>
-              </section>
-            )}
-          </>
-        ) : (
-          /* Closet Management & AI Photo Upload Tab */
-          <section className="space-y-6">
-            {/* AI Photo Upload Card */}
-            <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xs">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                <div>
-                  <h2 className="text-base font-bold flex items-center gap-2">
-                    <Upload className="h-4 w-4" />
-                    <span>写真から手持ち服を追加（Vertex AI 自動タグ & Clo値推定）</span>
-                  </h2>
-                  <p className="text-xs text-zinc-500 mt-1">
-                    服の写真をアップロードすると、カテゴリ・色・断熱性(Clo値)・1408次元ベクトルを自動抽出し、クローゼットに登録します。
-                  </p>
-                </div>
-                <label className="inline-flex cursor-pointer items-center gap-2 rounded-xl bg-zinc-900 px-4 py-2.5 text-xs font-bold text-white hover:bg-zinc-800 shrink-0 transition">
-                  <Plus className="h-4 w-4" />
-                  <span>{analyzingPhoto ? "AI解析中..." : "服の写真を選択"}</span>
-                  <input
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileUpload}
-                    className="hidden"
-                    disabled={analyzingPhoto}
-                  />
-                </label>
-              </div>
-
-              {previewPhotoUrl && analyzedDraft && (
-                <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/50 p-4 space-y-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-emerald-950">
-                      AI解析結果（内容を確認してクローゼットに追加できます）
-                    </span>
-                    <span className="font-mono text-[11px] text-emerald-700 font-semibold">
-                      Vector: {analyzedDraft.embedding_dimensions} dim ({analyzedDraft.analysis_source})
-                    </span>
-                  </div>
-
-                  <div className="flex flex-col sm:flex-row gap-4 items-center">
-                    <div className="h-28 w-28 rounded-xl overflow-hidden border border-emerald-200 bg-white shrink-0">
-                      <img
-                        src={previewPhotoUrl}
-                        alt="アップロードプレビュー"
-                        className="h-full w-full object-cover"
-                      />
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-4 text-xs flex-1 w-full">
-                      <div className="rounded-xl bg-white p-2.5 border border-emerald-100">
-                        <span className="text-zinc-400 block text-[10px]">アイテム名</span>
-                        <strong className="text-zinc-900">{analyzedDraft.suggested_name}</strong>
-                      </div>
-                      <div className="rounded-xl bg-white p-2.5 border border-emerald-100">
-                        <span className="text-zinc-400 block text-[10px]">カテゴリ / 色</span>
-                        <strong className="text-zinc-900">
-                          {CATEGORY_LABELS[analyzedDraft.category]} / {analyzedDraft.colors.join("・")}
-                        </strong>
-                      </div>
-                      <div className="rounded-xl bg-white p-2.5 border border-emerald-100">
-                        <span className="text-zinc-400 block text-[10px]">断熱性 (Clo値)</span>
-                        <strong className="text-zinc-900">{analyzedDraft.clo_value} Clo</strong>
-                      </div>
-                      <div className="rounded-xl bg-white p-2.5 border border-emerald-100">
-                        <span className="text-zinc-400 block text-[10px]">フォーマル度</span>
-                        <strong className="text-zinc-900">Lv.{analyzedDraft.formality} / 5</strong>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2 border-t border-emerald-100">
-                    <button
-                      onClick={() => {
-                        setAnalyzedDraft(null);
-                        setPreviewPhotoUrl(null);
-                      }}
-                      className="rounded-lg px-3 py-1.5 text-xs text-zinc-600 hover:bg-zinc-200/60"
-                    >
-                      キャンセル
-                    </button>
-                    <button
-                      onClick={handleConfirmAddClothing}
-                      className="rounded-lg bg-emerald-700 px-4 py-1.5 text-xs font-bold text-white hover:bg-emerald-800 transition"
-                    >
-                      クローゼットに登録して再推論する
-                    </button>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* 【新機能1】Vertex AI クロスモーダル・テイスト検索カード */}
-            <div className="rounded-2xl border border-indigo-200/80 bg-gradient-to-r from-indigo-50/70 via-purple-50/40 to-white p-4 shadow-2xs space-y-3">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-indigo-600 text-white shadow-xs">
-                    <Compass className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
-                      <span>Vertex AI クロスモーダル・テイスト検索</span>
-                      <span className="rounded bg-indigo-100 text-indigo-800 px-1.5 py-0.2 font-mono text-[9px]">
-                        multimodalembedding@001 (1408 dim)
-                      </span>
-                    </h3>
-                    <p className="text-[11px] text-zinc-500">
-                      自然言語の気分や場面を入力すると、手持ち服の画像ベクトルとの内積（類似度）を直接計算します
-                    </p>
-                  </div>
-                </div>
-
-                {crossModalResults && (
-                  <button
-                    onClick={handleClearCrossModal}
-                    className="self-start sm:self-center flex items-center gap-1 text-[11px] font-semibold text-zinc-500 hover:text-zinc-800 bg-white border border-zinc-200 px-2.5 py-1 rounded-lg"
-                  >
-                    <X className="h-3 w-3" />
-                    <span>検索解除（通常表示）</span>
-                  </button>
-                )}
-              </div>
-
-              {/* 検索入力欄 & クイックチップ */}
-              <div className="space-y-2">
-                <div className="flex gap-2">
-                  <div className="relative flex-1">
-                    <Search className="absolute left-3 top-2.5 h-4 w-4 text-zinc-400" />
-                    <input
-                      type="text"
-                      placeholder="気分・テイスト・場面を入力（例: 知的なカフェ作業、雨の日のモードスタイル、清潔感のある休日...）"
-                      value={crossModalQuery}
-                      onChange={(e) => setCrossModalQuery(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter") handleCrossModalSearch(crossModalQuery);
-                      }}
-                      className="w-full rounded-xl border border-indigo-200 bg-white pl-9 pr-3 py-2 text-xs text-zinc-900 focus:border-indigo-600 focus:outline-none shadow-xs"
-                    />
-                  </div>
-                  <button
-                    onClick={() => handleCrossModalSearch(crossModalQuery)}
-                    disabled={searchingCrossModal || !crossModalQuery.trim()}
-                    className="rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 px-4 py-2 text-xs font-bold text-white transition flex items-center gap-1.5 shrink-0"
-                  >
-                    {searchingCrossModal ? (
-                      <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Zap className="h-3.5 w-3.5" />
-                    )}
-                    <span>1408d ベクトル検索</span>
-                  </button>
-                </div>
-
-                <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                  <span className="text-[10px] text-zinc-400 font-medium">クイック検索例:</span>
-                  {[
-                    "☕ 知的なカフェ作業",
-                    "🌧️ 雨の日のモード",
-                    "💼 きれいめオフィス",
-                    "🌿 休日のリラックス散歩",
-                  ].map((chip) => {
-                    const cleanText = chip.replace(/^[^\s]+\s*/, "");
-                    return (
-                      <button
-                        key={chip}
-                        onClick={() => handleCrossModalSearch(cleanText)}
-                        className="rounded-lg bg-white/90 border border-indigo-100 hover:border-indigo-300 px-2.5 py-1 text-[11px] text-indigo-900 transition shadow-2xs"
-                      >
-                        {chip}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-
-            {/* Wardrobe Controls & Grid */}
-            <div className="space-y-4">
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-                <div className="flex items-center gap-2">
-                  <Layers className="h-4 w-4 text-zinc-600" />
-                  <h3 className="text-sm font-bold text-zinc-900">
-                    登録済みクローゼット（全{wardrobe.length}着 / うち死蔵予備軍{" "}
-                    <span className="text-amber-600">{dormantCount}着</span>）
-                  </h3>
-                </div>
-
-                {/* カテゴリ & 死蔵フィルタ */}
-                <div className="flex flex-wrap items-center gap-1.5">
-                  {(
-                    [
-                      { key: "all", label: "すべて" },
-                      { key: "top", label: "トップス" },
-                      { key: "bottom", label: "ボトムス" },
-                      { key: "outer", label: "アウター" },
-                      { key: "shoes", label: "シューズ" },
-                    ] as const
-                  ).map((tab) => (
-                    <button
-                      key={tab.key}
-                      onClick={() => setSelectedCategory(tab.key)}
-                      className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
-                        selectedCategory === tab.key
-                          ? "bg-zinc-900 text-white"
-                          : "bg-white border border-zinc-200 text-zinc-600 hover:border-zinc-400"
-                      }`}
-                    >
-                      {tab.label}
-                    </button>
-                  ))}
-                  <button
-                    onClick={() => setFilterDormantOnly(!filterDormantOnly)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition flex items-center gap-1 ${
-                      filterDormantOnly
-                        ? "bg-amber-500 text-white"
-                        : "bg-white border border-amber-200 text-amber-800 hover:border-amber-400"
-                    }`}
-                  >
-                    <Flame className="h-3 w-3" />
-                    <span>死蔵のみ</span>
-                  </button>
-                </div>
-              </div>
-
-              {/* Clothes Grid with Visual Photos */}
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {filteredWardrobe.map((item) => {
-                  const isDormant = item.days_since_last_worn >= 30;
-                  const isLaundry = item.availability === "laundry";
-                  const cmResult = crossModalMap?.get(item.id);
-                  return (
-                    <div
-                      key={item.id}
-                      className={`group rounded-2xl border bg-white overflow-hidden transition-all duration-200 shadow-2xs ${
-                        isLaundry
-                          ? "opacity-55 border-zinc-200"
-                          : cmResult && cmResult.match_percentage >= 85
-                          ? "border-indigo-400 ring-2 ring-indigo-400/20 shadow-md"
-                          : isDormant
-                          ? "border-amber-300 ring-1 ring-amber-300/40"
-                          : "border-zinc-200 hover:border-zinc-300"
-                      }`}
-                    >
-                      {/* 写真部分 */}
-                      <div
-                        onClick={() => setSelectedItemDetail(item)}
-                        className="relative aspect-16/10 w-full bg-zinc-100 overflow-hidden cursor-pointer"
-                      >
-                        {item.image_url ? (
-                          <img
-                            src={item.image_url}
-                            alt={item.name}
-                            className="h-full w-full object-cover group-hover:scale-105 transition duration-300"
-                            loading="lazy"
-                          />
-                        ) : (
-                          <div className="flex h-full w-full items-center justify-center text-zinc-300">
-                            <Shirt className="h-10 w-10" />
-                          </div>
-                        )}
-                        <span className="absolute top-2 left-2 rounded-md bg-black/60 backdrop-blur-xs px-2 py-0.5 text-[10px] font-bold text-white uppercase tracking-wider">
-                          {CATEGORY_LABELS[item.category]}
-                        </span>
-                        {cmResult && (
-                          <span className="absolute top-2 right-2 rounded-md bg-indigo-600 px-2 py-0.5 text-[10px] font-bold text-white shadow-xs flex items-center gap-1">
-                            <Zap className="h-3 w-3" />
-                            <span>Match {cmResult.match_percentage}%</span>
-                          </span>
-                        )}
-                        {!cmResult && isDormant && (
-                          <span className="absolute top-2 right-2 rounded-md bg-amber-500 px-2 py-0.5 text-[10px] font-bold text-white shadow-xs flex items-center gap-1">
-                            <Flame className="h-3 w-3" />
-                            <span>{item.days_since_last_worn}日未着用</span>
-                          </span>
-                        )}
-                        {item.water_resistant && (
-                          <span className="absolute bottom-2 left-2 rounded bg-blue-600/80 backdrop-blur-xs px-1.5 py-0.5 text-[9px] font-bold text-white">
-                            撥水仕様
-                          </span>
-                        )}
-                      </div>
-
-                      {/* メタデータ */}
-                      <div className="p-4 space-y-2.5">
-                        <div className="flex items-start justify-between gap-2">
-                          <h4 className="text-sm font-bold text-zinc-900 truncate">
-                            {item.name}
-                          </h4>
-                          <span className="font-mono text-xs font-bold text-zinc-800 shrink-0">
-                            {item.clo_value} Clo
-                          </span>
-                        </div>
-
-                        {cmResult && cmResult.matched_traits.length > 0 && (
-                          <div className="flex items-center gap-1 text-[10px] text-indigo-700 bg-indigo-50 px-2 py-1 rounded-md">
-                            <span className="font-semibold">マッチ特性:</span>
-                            <span className="truncate">{cmResult.matched_traits.join("・")}</span>
-                          </div>
-                        )}
-
-                        <div className="flex flex-wrap gap-1 text-[11px] text-zinc-600">
-                          <span className="rounded bg-zinc-100 px-1.5 py-0.5">
-                            {item.colors.join("・")}
-                          </span>
-                          <span className="rounded bg-zinc-100 px-1.5 py-0.5">
-                            フォーマル Lv.{item.formality}
-                          </span>
-                        </div>
-
-                        <div className="pt-2 border-t border-zinc-100 flex items-center justify-between text-xs">
-                          <span className="text-zinc-500 text-[11px]">
-                            着用 {item.wear_count}回
-                          </span>
-                          <button
-                            onClick={() => handleToggleLaundry(item.id)}
-                            className={`rounded-lg px-2.5 py-1 text-[11px] font-semibold transition ${
-                              isLaundry
-                                ? "bg-amber-600 text-white"
-                                : "bg-zinc-100 text-zinc-700 hover:bg-zinc-200"
-                            }`}
-                          >
-                            {isLaundry ? "洗濯中（除外中）" : "着用可能"}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          </section>
-        )}
-
-        {/* 【新機能2】被服気候学CSP連動アイテム部分入れ替えモーダル */}
-        {swapModal && (
-          <div
-            onClick={() => setSwapModal(null)}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl space-y-4 max-h-[90vh] flex flex-col"
-            >
-              <div className="flex items-center justify-between pb-3 border-b border-zinc-100">
-                <div>
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
-                    Option 0{swapModal.outfitRank} のアイテム入れ替え
-                  </span>
-                  <h3 className="text-base font-bold text-zinc-900 flex items-center gap-2">
-                    <span>{CATEGORY_LABELS[swapModal.targetCategory]} の差し替え候補</span>
-                    {trace && (
-                      <span className="rounded-full bg-zinc-100 text-zinc-700 px-2 py-0.5 text-[10px] font-mono">
-                        目標: {trace.target_clo_min}〜{trace.target_clo_max} Clo
-                      </span>
-                    )}
-                  </h3>
-                </div>
-                <button
-                  onClick={() => setSwapModal(null)}
-                  className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              <div className="text-xs text-zinc-500">
-                被服気候学の数理制約（目標断熱性・雨天靴）を崩さずに着回せる手持ち服の一覧です。
-              </div>
-
-              {swapLoading ? (
-                <div className="py-12 flex flex-col items-center justify-center text-zinc-400 text-xs gap-2">
-                  <RefreshCw className="h-5 w-5 animate-spin" />
-                  <span>CSP 物理制約を計算中...</span>
-                </div>
-              ) : (
-                <div className="space-y-2.5 overflow-y-auto pr-1 flex-1">
-                  {swapModal.candidates.map((cand) => (
-                    <div
-                      key={cand.item.id}
-                      className={`flex items-center justify-between p-3 rounded-xl border transition ${
-                        cand.is_currently_selected
-                          ? "border-zinc-900 bg-zinc-50 ring-1 ring-zinc-900/10"
-                          : cand.is_physically_safe
-                          ? "border-emerald-200 bg-emerald-50/30 hover:border-emerald-400"
-                          : "border-zinc-200 bg-zinc-50/50 opacity-60"
-                      }`}
-                    >
-                      <div className="flex items-center gap-3 min-w-0">
-                        <div className="h-14 w-14 rounded-lg overflow-hidden bg-zinc-100 shrink-0 border border-zinc-200">
-                          {cand.item.image_url ? (
-                            <img
-                              src={cand.item.image_url}
-                              alt={cand.item.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-zinc-300">
-                              <Shirt className="h-6 w-6" />
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="min-w-0">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-bold text-xs text-zinc-900 truncate">
-                              {cand.item.name}
-                            </span>
-                            {cand.is_currently_selected && (
-                              <span className="rounded bg-zinc-900 text-white px-1.5 py-0.2 text-[9px] font-bold">
-                                選択中
-                              </span>
-                            )}
-                            {cand.is_revival && (
-                              <span className="rounded bg-amber-500 text-white px-1.5 py-0.2 text-[9px] font-bold flex items-center gap-0.5">
-                                <Flame className="h-2.5 w-2.5" />
-                                <span>Revival</span>
-                              </span>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-2 text-[10px] text-zinc-500 mt-1">
-                            <span>{cand.item.colors.join("・")}</span>
-                            <span>•</span>
-                            <span className="font-mono font-semibold">単体 {cand.item.clo_value} Clo</span>
-                            <span>•</span>
-                            <span
-                              className={`font-mono font-bold ${
-                                cand.is_physically_safe ? "text-emerald-700" : "text-amber-700"
-                              }`}
-                            >
-                              合計 {cand.new_total_clo} Clo
-                            </span>
-                          </div>
-
-                          <div className="mt-1">
-                            {cand.is_physically_safe ? (
-                              <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-emerald-700">
-                                <CheckCircle2 className="h-3 w-3" />
-                                <span>熱的適正（目標断熱性を完全充足）</span>
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-medium text-amber-700">
-                                ⚠️ 今日の気温に対し断熱性が外れます
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="shrink-0 ml-2">
-                        {cand.is_currently_selected ? (
-                          <span className="text-xs font-bold text-zinc-400">現在採用中</span>
-                        ) : (
-                          <button
-                            onClick={() => handleApplySwap(cand.item)}
-                            className={`rounded-lg px-3 py-1.5 text-xs font-bold transition ${
-                              cand.is_physically_safe
-                                ? "bg-zinc-900 text-white hover:bg-zinc-800"
-                                : "bg-zinc-200 text-zinc-700 hover:bg-zinc-300"
-                            }`}
-                          >
-                            変更する
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              <div className="flex justify-end pt-2 border-t border-zinc-100">
-                <button
-                  onClick={() => setSwapModal(null)}
-                  className="rounded-xl px-4 py-2 text-xs font-semibold text-zinc-600 hover:bg-zinc-100"
-                >
-                  閉じる
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* 衣服詳細モーダル */}
-        {selectedItemDetail && (
-          <div
-            onClick={() => setSelectedItemDetail(null)}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
-          >
-            <div
-              onClick={(e) => e.stopPropagation()}
-              className="w-full max-w-md rounded-2xl bg-white p-5 shadow-2xl space-y-4"
-            >
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-bold uppercase tracking-wider text-zinc-400">
-                  {CATEGORY_LABELS[selectedItemDetail.category]}
-                </span>
-                <button
-                  onClick={() => setSelectedItemDetail(null)}
-                  className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100"
-                >
-                  <X className="h-5 w-5" />
-                </button>
-              </div>
-
-              {selectedItemDetail.image_url && (
-                <div className="aspect-4/3 w-full rounded-xl overflow-hidden bg-zinc-100">
-                  <img
-                    src={selectedItemDetail.image_url}
-                    alt={selectedItemDetail.name}
-                    className="h-full w-full object-cover"
-                  />
-                </div>
-              )}
-
-              <div>
-                <h3 className="text-lg font-bold text-zinc-900">
-                  {selectedItemDetail.name}
-                </h3>
-                <p className="text-xs text-zinc-500 mt-0.5">
-                  カラー: {selectedItemDetail.colors.join("・")} | スタイル:{" "}
-                  {selectedItemDetail.style_tags.join(", ") || "ベーシック"}
-                </p>
-              </div>
-
-              <div className="grid grid-cols-3 gap-2 text-center text-xs">
-                <div className="rounded-xl bg-zinc-50 p-2.5 border border-zinc-100">
-                  <span className="text-[10px] text-zinc-400 block">被服断熱性</span>
-                  <span className="font-mono font-bold text-sm">{selectedItemDetail.clo_value} Clo</span>
-                </div>
-                <div className="rounded-xl bg-zinc-50 p-2.5 border border-zinc-100">
-                  <span className="text-[10px] text-zinc-400 block">フォーマル度</span>
-                  <span className="font-bold text-sm">Lv.{selectedItemDetail.formality} / 5</span>
-                </div>
-                <div className="rounded-xl bg-zinc-50 p-2.5 border border-zinc-100">
-                  <span className="text-[10px] text-zinc-400 block">死蔵日数</span>
-                  <span className="font-bold text-sm text-amber-600">
-                    {selectedItemDetail.days_since_last_worn} 日前
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex justify-end pt-2">
-                <button
-                  onClick={() => setSelectedItemDetail(null)}
-                  className="w-full rounded-xl bg-zinc-900 py-2.5 text-xs font-bold text-white hover:bg-zinc-800"
-                >
-                  閉じる
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+      {/* Main Chat Timeline */}
+      <main className="flex-1 flex flex-col justify-between">
+        <ChatMessageList
+          messages={messages}
+          onOpenSwap={handleOpenSwapModal}
+          onApplySwap={handleApplySwap}
+          onWearOutfit={handleWearOutfit}
+          onConfirmAddClothing={handleConfirmAddClothing}
+          onItemDetail={(item) => setSelectedItemDetail(item)}
+          onOpenContextDrawer={() => setIsContextDrawerOpen(true)}
+          onOpenClosetDrawer={() => setIsClosetDrawerOpen(true)}
+          selectedOutfitRank={selectedOutfitRank}
+          isCalendarSaving={isCalendarSaving}
+          isLoading={isLoading}
+        />
+        <div ref={chatBottomRef} />
       </main>
+
+      {/* Bottom Sticky Composer */}
+      <ChatComposer
+        onSendMessage={handleUserSendMessage}
+        onSendPhoto={handleSendPhoto}
+        onSelectChip={handleSelectChip}
+        suggestedChips={suggestedChips}
+        disabled={isLoading}
+      />
+
+      {/* 手持ちクローゼットドロワー */}
+      <ClosetDrawer
+        isOpen={isClosetDrawerOpen}
+        onClose={() => setIsClosetDrawerOpen(false)}
+        wardrobe={wardrobe}
+        onToggleLaundry={handleToggleLaundry}
+        onItemDetail={(item) => setSelectedItemDetail(item)}
+        onTriggerPhotoUpload={() => {
+          setIsClosetDrawerOpen(false);
+          handleSelectChip("📷 服を登録する");
+        }}
+        onSearchCrossModal={async (query) => {
+          return searchWardrobeCrossModal({ query, wardrobe });
+        }}
+      />
+
+      {/* 環境コンテキスト設定ドロワー */}
+      <ContextDrawer
+        isOpen={isContextDrawerOpen}
+        onClose={() => setIsContextDrawerOpen(false)}
+        weather={weather}
+        events={events}
+        profile={profile}
+        gcalStatus={gcalStatus}
+        isGCalLoading={isGCalLoading}
+        onSelectCity={async (cityName) => {
+          const newW = await lookupWeather(cityName);
+          setWeather(newW);
+          if (events) executeRecommendation(newW, events, profile, wardrobe, recentWornIds, `${cityName}の気象データに更新しました。`);
+        }}
+        onConnectGoogleCalendar={handleConnectGoogleCalendar}
+        onDisconnectGoogleCalendar={handleDisconnectGoogleCalendar}
+        onAddEvent={(ev) => {
+          const updated = [...events, ev].sort((a, b) => a.start_time.localeCompare(b.start_time));
+          setEvents(updated);
+          if (weather) executeRecommendation(weather, updated, profile, wardrobe, recentWornIds, `予定「${ev.title}」を追加し、フォーマル度と活動量を再計算しました。`);
+        }}
+        onDeleteEvent={(idx) => {
+          const updated = events.filter((_, i) => i !== idx);
+          setEvents(updated);
+          if (weather) executeRecommendation(weather, updated, profile, wardrobe, recentWornIds);
+        }}
+        onSensitivityChange={(delta) => {
+          const nextProf = { ...profile, cold_sensitivity: delta };
+          setProfile(nextProf);
+          if (weather) executeRecommendation(weather, events, nextProf, wardrobe, recentWornIds);
+        }}
+      />
+
+      {/* 衣服詳細モーダル */}
+      {selectedItemDetail && (
+        <div
+          onClick={() => setSelectedItemDetail(null)}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl bg-white p-5 shadow-2xl space-y-3"
+          >
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-zinc-400">
+                {CATEGORY_LABELS[selectedItemDetail.category]}
+              </span>
+              <button
+                onClick={() => setSelectedItemDetail(null)}
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {selectedItemDetail.image_url && (
+              <div className="aspect-4/3 w-full rounded-xl overflow-hidden bg-zinc-100">
+                <img
+                  src={selectedItemDetail.image_url}
+                  alt={selectedItemDetail.name}
+                  className="h-full w-full object-cover"
+                />
+              </div>
+            )}
+
+            <div>
+              <h4 className="text-sm font-bold text-zinc-900">{selectedItemDetail.name}</h4>
+              <p className="text-[11px] text-zinc-500 mt-0.5">
+                {selectedItemDetail.colors.join("・")} | スタイル: {selectedItemDetail.style_tags.join(", ") || "ベーシック"}
+              </p>
+            </div>
+
+            <div className="grid grid-cols-3 gap-2 text-center text-xs">
+              <div className="rounded-xl bg-zinc-50 p-2 border border-zinc-100">
+                <span className="text-[9px] text-zinc-400 block">断熱性</span>
+                <span className="font-mono font-bold text-xs">{selectedItemDetail.clo_value} Clo</span>
+              </div>
+              <div className="rounded-xl bg-zinc-50 p-2 border border-zinc-100">
+                <span className="text-[9px] text-zinc-400 block">フォーマル</span>
+                <span className="font-bold text-xs">Lv.{selectedItemDetail.formality}</span>
+              </div>
+              <div className="rounded-xl bg-zinc-50 p-2 border border-zinc-100">
+                <span className="text-[9px] text-zinc-400 block">未着用</span>
+                <span className="font-bold text-xs text-amber-600">
+                  {selectedItemDetail.days_since_last_worn}日前
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={() => setSelectedItemDetail(null)}
+              className="w-full rounded-xl bg-zinc-900 py-2 text-xs font-bold text-white hover:bg-zinc-800"
+            >
+              閉じる
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -146,3 +146,47 @@ class SwapCandidateItem(BaseModel):
     new_total_clo: float
     predicted_tpo_fit: float
     is_revival: bool
+
+
+# --- チャット Intent & 会話連携用スキーマ ---
+
+ChatIntentType = Literal[
+    "recommend",           # コーデ再提案・スタイル変更
+    "add_clothing_text",   # チャットテキストからの服登録
+    "swap_item",           # アイテム部分入れ替え
+    "search_wardrobe",     # 1408次元テイスト検索
+    "update_weather",      # 都市・天気変更
+    "update_sensitivity",  # 寒がり/暑がり変更
+    "add_event",           # 予定追加
+    "open_closet",         # クローゼット確認
+    "general_reply",       # 一般対話・スタイリスト返答
+]
+
+
+class ChatContextSummary(BaseModel):
+    """トークン削減のため、会話履歴ではなく最小限の状態要約のみを送信する"""
+    location_name: str = "東京・渋谷"
+    cold_sensitivity: int = 0
+    events_count: int = 0
+    has_active_outfit: bool = False
+    preferred_styles: list[str] = Field(default_factory=list)
+
+
+class ChatIntentRequest(BaseModel):
+    message: str
+    context: ChatContextSummary = Field(default_factory=ChatContextSummary)
+
+
+class ChatIntentResponse(BaseModel):
+    intent: ChatIntentType
+    assistant_message: str
+    clothing_draft: AnalyzeClothingResponse | None = None
+    target_category: ClothingCategory | None = None
+    location_query: str | None = None
+    cold_sensitivity: int | None = None
+    preferred_styles: list[str] | None = None
+    search_query: str | None = None
+    new_event: RawCalendarEvent | None = None
+    suggested_chips: list[str] = Field(default_factory=list)
+    intent_source: str = "tier1-deterministic-rule"
+

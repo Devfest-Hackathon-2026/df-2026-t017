@@ -11,6 +11,8 @@ from app.core.physics import (
 )
 from app.models.schemas import (
     AnalyzeClothingResponse,
+    ChatIntentRequest,
+    ChatIntentResponse,
     CrossModalSearchRequest,
     CrossModalSearchResult,
     PipelineTrace,
@@ -21,6 +23,7 @@ from app.models.schemas import (
     SwapCandidatesRequest,
     WeatherSnapshot,
 )
+from app.services.chat_service import resolve_chat_intent
 from app.services.demo_data import get_demo_presets, get_demo_wardrobe
 from app.services.gemini_service import analyze_clothing_image, rerank_and_explain_outfits
 from app.services.vector_service import (
@@ -130,6 +133,27 @@ async def get_swap_candidates(
         wardrobe=payload.wardrobe,
     )
     return candidates
+
+
+@router.post("/chat/intent", response_model=ChatIntentResponse)
+async def handle_chat_intent(
+    payload: ChatIntentRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> ChatIntentResponse:
+    """
+    ユーザーのチャット発話から意図（コーデ再提案・テキスト服登録・Swap・天気変更など）を解析。
+    Tier 1 ルールで判定可能なものは0トークンで即答し、AIコストを最小化する。
+    """
+    res = resolve_chat_intent(payload)
+    log_structured(
+        "INFO",
+        "Chat intent resolved",
+        event_type="chat_intent",
+        uid=auth.uid,
+        intent=res.intent,
+        source=res.intent_source,
+    )
+    return res
 
 
 @router.post("/recommend", response_model=RecommendResponse)

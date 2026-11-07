@@ -121,3 +121,100 @@ export interface SwapCandidateItem {
   predicted_tpo_fit: number;
   is_revival: boolean;
 }
+
+export type ChatIntentType =
+  | "recommend"
+  | "add_clothing_text"
+  | "swap_item"
+  | "search_wardrobe"
+  | "update_weather"
+  | "update_sensitivity"
+  | "add_event"
+  | "open_closet"
+  | "general_reply";
+
+export interface ChatContextSummary {
+  location_name: string;
+  cold_sensitivity: number;
+  events_count: number;
+  has_active_outfit: boolean;
+  preferred_styles: string[];
+}
+
+export interface ChatIntentRequest {
+  message: string;
+  context: ChatContextSummary;
+}
+
+export interface ChatIntentResponse {
+  intent: ChatIntentType;
+  assistant_message: string;
+  clothing_draft?: AnalyzeClothingResponse | null;
+  target_category?: ClothingCategory | null;
+  location_query?: string | null;
+  cold_sensitivity?: number | null;
+  preferred_styles?: string[] | null;
+  search_query?: string | null;
+  new_event?: RawCalendarEvent | null;
+  suggested_chips: string[];
+  intent_source: string;
+}
+
+export interface ChatAttachmentBriefing {
+  type: "briefing";
+  weather: WeatherSnapshot;
+  events: RawCalendarEvent[];
+  trace?: PipelineTrace | null;
+}
+
+export interface ChatAttachmentOutfits {
+  type: "outfits";
+  outfits: OutfitProposal[];
+  trace?: PipelineTrace | null;
+  selectedOutfitRank?: number | null;
+}
+
+export interface ChatAttachmentClothingDraft {
+  type: "clothing_draft";
+  draft: AnalyzeClothingResponse;
+  imageUrl?: string | null;
+}
+
+export interface ChatAttachmentSwapCandidates {
+  type: "swap_candidates";
+  targetCategory: ClothingCategory;
+  candidates: SwapCandidateItem[];
+  outfitRank: number;
+}
+
+export interface ChatAttachmentSearchResults {
+  type: "search_results";
+  query: string;
+  results: CrossModalSearchResult[];
+}
+
+export interface ChatAttachmentCalendarSaved {
+  type: "calendar_saved";
+  title: string;
+  htmlLink?: string;
+  templateUrl?: string;
+}
+
+export type ChatAttachment =
+  | ChatAttachmentBriefing
+  | ChatAttachmentOutfits
+  | ChatAttachmentClothingDraft
+  | ChatAttachmentSwapCandidates
+  | ChatAttachmentSearchResults
+  | ChatAttachmentCalendarSaved;
+
+export interface ChatMessage {
+  id: string;
+  sender: "user" | "assistant";
+  timestamp: string;
+  text?: string;
+  imageUrl?: string | null;
+  attachment?: ChatAttachment;
+  suggestedChips?: string[];
+}
+

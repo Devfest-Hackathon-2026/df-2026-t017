@@ -92,6 +92,21 @@
      - AIに丸投げするのではなく、「靴だけスニーカーにしたい」「アウターを変えたい」という人間の主体的意志（Intent）を尊重。
      - 人間が差し替える際、裏側の被服気候学数理ソルバー（CSP）がリアルタイムに働き、「気温に対する熱的安全性を崩さない手持ち服」のみを動的判定してサジェストすることで、**「AIの安全柵の中で人間がクリエイティブに服を決定する共創体験」**を完成させた。
 
+## #9 Google Calendar 本番OAuth 2.0 連携とプライバシーサニタイズ（Zero Raw PII Leakage）の昇華（2026-11-07）
+- 候補:
+  - 案A: 静的な予定プリセットの手動入力・編集のみにとどめる
+  - 案B: **Google Identity Services (GIS) による本番 Google Calendar API 連携 ＋ 1クリック・スマートデモフォールバック ＋ 被服気候学サニタイズ（Zero Raw PII Leakage）**
+- **決定: 案Bを採用**
+- 理由（UXと技術選定のWhy）:
+  1. **Google Workspace × Google Cloud のシナジー最大化**:
+     - Google Calendar API v3（予定・移動・TPO取得）× 被服気候学数理モデル（Clo値×METs）× Vertex AI Gemini による、Googleエコシステムを縦断した真のエンドツーエンドな朝の身支度DXを実現。
+  2. **実用性と審査実演の二重保証（Graceful Fallback）**:
+     - 実 Client ID 設定時は本物の Google OAuth 2.0 ポップアップで当日の予定を同期。
+     - Client ID 未設定時や審査員の個人アカウントを連携できない環境でも、「1クリックでGoogle Meet/出社商談/移動/会食予定を読み込むスマートデモ」を備え、100%確実に審査実演可能。
+  3. **プライバシーアーキテクチャのWhy**:
+     - ユーザーのカレンダー予定（会議名・訪問先・個人情報）は、バックエンドの被服気候学サニタイザーによって活動分類（office/academic/dining/commute/casual）・推定代謝量（1.2〜2.6 METs）・要求フォーマル度（1〜5）へ不可逆変換され、生データが外部LLMに流出しないプライバシーファースト（Zero Raw PII Leakage）を堅持。
+
+
 
 
 

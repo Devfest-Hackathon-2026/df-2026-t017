@@ -51,6 +51,12 @@ import {
   UserProfile,
   WeatherSnapshot,
 } from "@/types/closet";
+import {
+  fetchGoogleCalendarEvents,
+  getGoogleCalendarAccessToken,
+  getSimulatedGoogleEvents,
+  isGoogleAuthAvailable,
+} from "@/lib/googleCalendar";
 
 const CATEGORY_LABELS: Record<ClothingCategory, string> = {
   top: "トップス",
@@ -93,6 +99,11 @@ export default function ClosetMeApp() {
     end_time: "16:00",
     location: "",
   });
+
+  // Google Calendar 連携State
+  const [gcalStatus, setGcalStatus] = useState<"disconnected" | "connected_real" | "connected_demo">("disconnected");
+  const [isGCalLoading, setIsGCalLoading] = useState<boolean>(false);
+  const [gcalMessage, setGcalMessage] = useState<string | null>(null);
 
   const [profile, setProfile] = useState<UserProfile>({
     cold_sensitivity: 0,
@@ -200,6 +211,8 @@ export default function ClosetMeApp() {
     const found = presets.find((p) => p.id === presetId);
     if (!found) return;
     setSelectedPresetId(found.id);
+    setGcalStatus("disconnected");
+    setGcalMessage(null);
     setWeather(found.weather);
     setEvents(found.events);
     setProfile(found.profile);
@@ -210,6 +223,58 @@ export default function ClosetMeApp() {
       wardrobe,
       recentWornIds
     );
+  };
+
+  const handleConnectGoogleCalendar = async (forceDemo: boolean = false) => {
+    setIsGCalLoading(true);
+    setGcalMessage(null);
+    try {
+      if (!forceDemo && isGoogleAuthAvailable()) {
+        const token = await getGoogleCalendarAccessToken();
+        const fetchedEvents = await fetchGoogleCalendarEvents(token);
+        if (fetchedEvents.length === 0) {
+          setGcalMessage("本日のGoogleカレンダーの予定は0件でした。快適なリラックス服を提案します。");
+        } else {
+          setGcalMessage(`Google カレンダーから本日の予定（${fetchedEvents.length}件）を取得しました。`);
+        }
+        setEvents(fetchedEvents);
+        setGcalStatus("connected_real");
+        if (weather) {
+          await runRecommendation(weather, fetchedEvents, profile, wardrobe, recentWornIds);
+        }
+      } else {
+        // スマートデモモード（または Client ID 未設定時の1クリック検証）
+        const demoEvents = getSimulatedGoogleEvents();
+        setEvents(demoEvents);
+        setGcalStatus("connected_demo");
+        setGcalMessage("【デモ連携】Google カレンダーから本日の予定（4件: Meet/出社商談/移動/会食）を同期しました。");
+        if (weather) {
+          await runRecommendation(weather, demoEvents, profile, wardrobe, recentWornIds);
+        }
+      }
+    } catch (err) {
+      console.warn("Google Calendar connection notice:", err);
+      // 万一のOAuthポップアップブロックやエラー時はデモ連携をフォールバックとして提案
+      setGcalMessage(
+        err instanceof Error
+          ? `Google 認証エラー: ${err.message}`
+          : "Google カレンダー連携に失敗しました。"
+      );
+    } finally {
+      setIsGCalLoading(false);
+    }
+  };
+
+  const handleDisconnectGoogleCalendar = async () => {
+    setGcalStatus("disconnected");
+    setGcalMessage(null);
+    const preset = presets.find((p) => p.id === selectedPresetId) || presets[0];
+    if (preset) {
+      setEvents(preset.events);
+      if (weather) {
+        await runRecommendation(weather, preset.events, profile, wardrobe, recentWornIds);
+      }
+    }
   };
 
   const handleCitySelect = async (cityName: string) => {
@@ -705,27 +770,104 @@ export default function ClosetMeApp() {
                   </div>
                 </div>
 
-                {/* Google Calendar Card (予定のリアルタイム同期・追加・削除) */}
+                {/* Google Calendar Card (本番OAuth & 1-Click デモ同期・予定編集) */}
                 <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xs flex flex-col justify-between">
                   <div>
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2 text-xs font-semibold text-zinc-600">
-                        <Calendar className="h-4 w-4 text-indigo-600" />
-                        <span className="tracking-wide">Google Calendar 予定</span>
-                      </div>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 mb-3">
                       <div className="flex items-center gap-2">
+                        <Calendar className="h-4 w-4 text-indigo-600" />
+                        <span className="text-xs font-bold text-zinc-800 tracking-wide">
+                          Google Calendar 連携
+                        </span>
+                        {gcalStatus === "connected_real" && (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 text-emerald-800 px-2.5 py-0.5 text-[10px] font-semibold">
+                            <span className="h-1.5 w-1.5 rounded-full bg-emerald-600 animate-pulse" />
+                            本番カレンダー同期中
+                          </span>
+                        )}
+                        {gcalStatus === "connected_demo" && (
+                          <span className="inline-flex items-center gap-1.5 rounded-full bg-blue-100 text-blue-800 px-2.5 py-0.5 text-[10px] font-semibold">
+                            <span className="h-1.5 w-1.5 rounded-full bg-blue-600" />
+                            カレンダー同期中（デモ）
+                          </span>
+                        )}
+                        {gcalStatus === "disconnected" && (
+                          <span className="inline-flex items-center rounded-full bg-zinc-100 text-zinc-600 px-2 py-0.5 text-[10px] font-medium">
+                            プリセット予定
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center flex-wrap gap-2">
                         <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold text-emerald-700 border border-emerald-200">
                           <ShieldCheck className="h-3 w-3" /> PII サニタイズ済
                         </span>
+
+                        {gcalStatus === "disconnected" ? (
+                          <button
+                            onClick={() => handleConnectGoogleCalendar(false)}
+                            disabled={isGCalLoading}
+                            className="flex items-center gap-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1 text-[11px] font-bold shadow-xs transition disabled:opacity-50"
+                          >
+                            <RefreshCw
+                              className={`h-3 w-3 ${isGCalLoading ? "animate-spin" : ""}`}
+                            />
+                            <span>
+                              {isGoogleAuthAvailable()
+                                ? "Google カレンダーと連携"
+                                : "Google カレンダー連携（デモ同期）"}
+                            </span>
+                          </button>
+                        ) : (
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              onClick={() =>
+                                handleConnectGoogleCalendar(gcalStatus === "connected_demo")
+                              }
+                              disabled={isGCalLoading}
+                              title="カレンダーを再同期"
+                              className="flex items-center gap-1 rounded-lg border border-zinc-200 px-2 py-1 text-[11px] font-medium text-zinc-700 hover:bg-zinc-100 transition"
+                            >
+                              <RefreshCw
+                                className={`h-3 w-3 ${isGCalLoading ? "animate-spin" : ""}`}
+                              />
+                              <span>再同期</span>
+                            </button>
+                            <button
+                              onClick={handleDisconnectGoogleCalendar}
+                              title="カレンダー連携を解除してプリセットに戻す"
+                              className="rounded-lg border border-zinc-200 px-2 py-1 text-[11px] font-medium text-zinc-500 hover:bg-zinc-100 transition"
+                            >
+                              解除
+                            </button>
+                          </div>
+                        )}
+
                         <button
                           onClick={() => setIsAddingEvent(!isAddingEvent)}
                           className="flex items-center gap-1 rounded-lg bg-zinc-900 hover:bg-zinc-800 text-white px-2 py-1 text-[11px] font-medium transition"
                         >
                           <Plus className="h-3 w-3" />
-                          <span>予定追加</span>
+                          <span>手動追加</span>
                         </button>
                       </div>
                     </div>
+
+                    {/* カレンダー連携通知バナー */}
+                    {gcalMessage && (
+                      <div className="mb-3 flex items-center justify-between rounded-xl border border-indigo-100 bg-indigo-50/70 px-3 py-2 text-[11px] text-indigo-900">
+                        <div className="flex items-center gap-1.5">
+                          <Sparkles className="h-3.5 w-3.5 text-indigo-600 shrink-0" />
+                          <span>{gcalMessage}</span>
+                        </div>
+                        <button
+                          onClick={() => setGcalMessage(null)}
+                          className="text-indigo-400 hover:text-indigo-600 p-0.5 ml-2"
+                        >
+                          <X className="h-3 w-3" />
+                        </button>
+                      </div>
+                    )}
 
                     {/* インライン予定追加フォーム */}
                     {isAddingEvent && (
@@ -830,7 +972,7 @@ export default function ClosetMeApp() {
                   </div>
 
                   <p className="text-[10px] text-zinc-400 pt-3 border-t border-zinc-100 mt-2">
-                    ※ カレンダー予定の生テキストは保存されず、活動代謝量(METs)と要求フォーマル度に変換されます。
+                    ※ Google Calendar の生データは外部・LLMへ直接送信されず、被服気候学エンジンで活動量(METs)と要求フォーマル度にサニタイズされた上で推論されます（Zero Raw PII Leakage）。
                   </p>
                 </div>
               </div>

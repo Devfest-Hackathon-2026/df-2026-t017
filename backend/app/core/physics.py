@@ -40,7 +40,28 @@ def sanitize_calendar_events(events: list[RawCalendarEvent]) -> list[SanitizedAc
         text = f"{ev.title} {ev.location or ''}".lower()
         slot = f"{ev.start_time}-{ev.end_time}"
 
-        if any(k in text for k in ["インターン", "出社", "mtg", "会議", "面談", "面接", "office", "client"]):
+        # 1. 重要商談・式典・プレゼン・登壇 (最高フォーマル度 5)
+        if any(k in text for k in ["商談", "プレゼン", "登壇", "式典", "面接", "発表", "pitch", "presentation", "interview", "フォーマル"]):
+            sanitized.append(
+                SanitizedActivity(
+                    time_slot=slot,
+                    activity_type="office",
+                    estimated_mets=1.3,
+                    required_formality=5,
+                )
+            )
+        # 2. オンライン会議・リモートワーク・在宅 (画面映えするきれいめカジュアル フォーマル度 3)
+        elif any(k in text for k in ["meet", "zoom", "teams", "リモート", "在宅", "オンライン", "webinar", "ウェビナー", "telework", "wfh"]):
+            sanitized.append(
+                SanitizedActivity(
+                    time_slot=slot,
+                    activity_type="office",
+                    estimated_mets=1.2,
+                    required_formality=3,
+                )
+            )
+        # 3. 一般出社・対面会議・オフィスワーク (フォーマル度 4)
+        elif any(k in text for k in ["出社", "出社日", "オフィス", "mtg", "会議", "面談", "office", "client", "ミーティング", "打合せ", "打ち合わせ"]):
             sanitized.append(
                 SanitizedActivity(
                     time_slot=slot,
@@ -49,7 +70,8 @@ def sanitize_calendar_events(events: list[RawCalendarEvent]) -> list[SanitizedAc
                     required_formality=4,
                 )
             )
-        elif any(k in text for k in ["ゼミ", "授業", "講義", "大学", "研究", "campus", "lecture"]):
+        # 4. ゼミ・大学・研究 (フォーマル度 3)
+        elif any(k in text for k in ["ゼミ", "授業", "講義", "大学", "研究", "campus", "lecture", "school"]):
             sanitized.append(
                 SanitizedActivity(
                     time_slot=slot,
@@ -58,7 +80,8 @@ def sanitize_calendar_events(events: list[RawCalendarEvent]) -> list[SanitizedAc
                     required_formality=3,
                 )
             )
-        elif any(k in text for k in ["食事", "ディナー", "飲み", "ランチ", "カフェ", "ビストロ", "dinner"]):
+        # 5. 食事・ディナー・会食・飲み会 (フォーマル度 3)
+        elif any(k in text for k in ["食事", "ディナー", "飲み", "ランチ", "カフェ", "ビストロ", "dinner", "lunch", "会食", "懇親会", "忘年会", "新年会"]):
             sanitized.append(
                 SanitizedActivity(
                     time_slot=slot,
@@ -67,7 +90,18 @@ def sanitize_calendar_events(events: list[RawCalendarEvent]) -> list[SanitizedAc
                     required_formality=3,
                 )
             )
-        elif any(k in text for k in ["散歩", "移動", "買い物", "公園", "屋外", "イベント", "walk", "outdoor"]):
+        # 6. 移動・通勤・電車 (代謝量高め METs 2.5)
+        elif any(k in text for k in ["移動", "通勤", "電車", "フライト", "飛行機", "transit", "commute", "移動中", "新幹線"]):
+            sanitized.append(
+                SanitizedActivity(
+                    time_slot=slot,
+                    activity_type="commute",
+                    estimated_mets=2.5,
+                    required_formality=2,
+                )
+            )
+        # 7. 屋外・散歩・アクティビティ (METs 2.6)
+        elif any(k in text for k in ["散歩", "買い物", "公園", "屋外", "イベント", "walk", "outdoor", "ショッピング", "フェス", "観光"]):
             sanitized.append(
                 SanitizedActivity(
                     time_slot=slot,
@@ -76,6 +110,7 @@ def sanitize_calendar_events(events: list[RawCalendarEvent]) -> list[SanitizedAc
                     required_formality=2,
                 )
             )
+        # 8. その他日常・カジュアル
         else:
             sanitized.append(
                 SanitizedActivity(

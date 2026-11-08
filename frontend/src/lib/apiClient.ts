@@ -4,6 +4,8 @@ import {
   ChatIntentResponse,
   ClothingCategory,
   ClothingItem,
+  ComfortFeedbackRequest,
+  ComfortFeedbackResponse,
   CrossModalSearchResult,
   DemoPreset,
   RawCalendarEvent,
@@ -35,6 +37,7 @@ export async function requestRecommendations(params: {
   profile: UserProfile;
   wardrobe: ClothingItem[];
   recent_worn_ids: string[];
+  destination_location?: string | null;
 }): Promise<RecommendResponse> {
   const res = await fetch(`${API_BASE}/recommend`, {
     method: "POST",
@@ -68,8 +71,19 @@ export async function analyzeClothingPhoto(
   return res.json();
 }
 
-export async function lookupWeather(location: string): Promise<WeatherSnapshot> {
-  const res = await fetch(`${API_BASE}/weather/lookup?location=${encodeURIComponent(location)}`, {
+export async function lookupWeather(
+  params: string | { location?: string; lat?: number; lng?: number }
+): Promise<WeatherSnapshot> {
+  const queryParams = new URLSearchParams();
+  if (typeof params === "string") {
+    queryParams.set("location", params);
+  } else {
+    if (params.location) queryParams.set("location", params.location);
+    if (params.lat !== undefined) queryParams.set("lat", String(params.lat));
+    if (params.lng !== undefined) queryParams.set("lng", String(params.lng));
+  }
+
+  const res = await fetch(`${API_BASE}/weather/lookup?${queryParams.toString()}`, {
     headers: { "X-Demo-Mode": "true" },
   });
   if (!res.ok) {
@@ -132,6 +146,60 @@ export async function interpretChatMessage(
   });
   if (!res.ok) {
     throw new Error(`Chat intent failed: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function enrichEventsWeather(params: {
+  events: RawCalendarEvent[];
+  base_weather: WeatherSnapshot;
+}): Promise<RawCalendarEvent[]> {
+  const res = await fetch(`${API_BASE}/events/weather`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Demo-Mode": "true",
+    },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to enrich events with weather: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function submitComfortFeedback(
+  params: ComfortFeedbackRequest
+): Promise<ComfortFeedbackResponse> {
+  const res = await fetch(`${API_BASE}/feedback/comfort`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Demo-Mode": "true",
+    },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to submit comfort feedback: ${res.status}`);
+  }
+  return res.json();
+}
+
+export async function recordOutfitWear(params: {
+  item_ids: string[];
+  total_clo: number;
+  weather_location?: string;
+}): Promise<{ status: string; wear_count_updated: number; saved_to: string }> {
+  const res = await fetch(`${API_BASE}/wardrobe/wear`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Demo-Mode": "true",
+    },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    throw new Error(`Failed to record worn outfit: ${res.status}`);
   }
   return res.json();
 }

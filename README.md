@@ -13,6 +13,8 @@
 - **物理的快適性は「数理モデル」で解く**：被服気候学の国際指標 **Clo値（衣服の断熱性）** と活動代謝量（METs）から熱的に安全な組み合わせ空間を決定論的にフィルタリング。
 - **視覚的調和と死蔵衣類の再発見は「ベクトル検索」で解く**：**Vertex AI Multimodal Embeddings × Cloud Firestore Vector Search** で眠っている服の新しい着回しを発掘。
 - **TPO文脈理解と説明は「Gemini」で解く**：**Vertex AI Gemini**（Structured Outputs）が多基準評価と納得感のある推薦理由を生成。
+- **ガイド付きリッチカード型チャットUI**：2×2実写写真コラージュ、靴やアウターのインライン差し替え（Swap）、推論トレース開示を備えた会話型UI。
+- **3段階省コストIntentルーティング**：Tier 0〜1（0トークン/ミリ秒即答）とTier 2（最小JSON構造化）により、大会付与の $20 クレジットを保護しながら高速応答を実現。
 
 ---
 
@@ -52,11 +54,24 @@
 │       ├── services/     # Vertex AI Gemini / Embeddings / Firestore / Weather
 │       └── api/          # REST エンドポイント
 └── DevFest/              # 企画書・要件定義・Whyログ（意思決定記録）
+    ├── README.md         # ドキュメント一覧・インデックス
+    ├── ClosetMe_企画・要件定義.md # プロダクト仕様・AI/GCPアーキテクチャ詳細
+    └── Whyログ.md        # 意思決定ログ（#1〜#10 技術選定と代替案のWhy）
 ```
 
 ---
 
-## 4. ローカル起動手順
+## 4. ドキュメント一覧
+
+詳細な企画書・技術設計書・意思決定ログは `DevFest/` ディレクトリに格納されています。
+
+- **[Closet Me 企画・要件定義書（v1.0 確定版）](file:///c:/Users/rin01/sample-dev/DevFes/DevFest/ClosetMe_企画・要件定義.md)**: 課題定義、被服気候学Clo値数理モデル、Vertex AI / Vector Search パイプライン、UI/UX仕様
+- **[Whyログ（意思決定記録）](file:///c:/Users/rin01/sample-dev/DevFes/DevFest/Whyログ.md)**: 大会テーマ「Own the Why」に基づく10件の技術選定・アーキテクチャ意思決定の記録
+- **[DevFest ドキュメントインデックス](file:///c:/Users/rin01/sample-dev/DevFes/DevFest/README.md)**: 大会関連資料・審査基準・提出物まとめ
+
+---
+
+## 5. ローカル起動手順
 
 審査・開発を即座に確認できるよう、GCP認証情報がないローカル環境でも**1クリック・デモモード（数理エンジン実稼働＋AIフォールバック）**で全フローが動作します。GCP環境変数を設定すると自動的に本番 Vertex AI / Firestore モードに切り替わります。
 

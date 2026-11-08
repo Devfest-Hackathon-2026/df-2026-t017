@@ -1,4 +1,9 @@
+import colorsys
+import io
 import json
+from typing import Literal
+import numpy as np
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from app.core.config import settings
@@ -13,10 +18,77 @@ from app.models.schemas import (
 )
 
 
+def extract_dominant_colors_from_image(image_bytes: bytes, max_colors: int = 2) -> list[str]:
+    """
+    画像バイナリの中央部（被写体領域）から、決定論的HSV空間解析により主要色を抽出する。
+    AIモデルを使用せず、ミリ秒単位で「ブラック」「ホワイト」「ネイビー」「ベージュ」等を高精度判定。
+    """
+    try:
+        img = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        # リサイズして高速化
+        img = img.resize((100, 100))
+        # 外枠20%を除いた中央領域（60x60）をサンプリング
+        crop_box = (20, 20, 80, 80)
+        center_img = img.crop(crop_box)
+        arr = np.asarray(center_img, dtype=np.float32) / 255.0
+
+        color_votes: dict[str, int] = {}
+        total_pixels = arr.shape[0] * arr.shape[1]
+
+        for r, g, b in arr.reshape(-1, 3):
+            h, s, v = colorsys.rgb_to_hsv(float(r), float(g), float(b))
+            h_deg = h * 360.0
+
+            if v < 0.22:
+                label = "ブラック"
+            elif v < 0.40 and s < 0.25:
+                label = "チャコール"
+            elif v > 0.82 and s < 0.16:
+                label = "ホワイト"
+            elif s < 0.18:
+                label = "グレー"
+            else:
+                if h_deg >= 345 or h_deg < 15:
+                    label = "ワインレッド" if v < 0.55 else "レッド"
+                elif 15 <= h_deg < 45:
+                    if v < 0.45:
+                        label = "ブラウン"
+                    elif v < 0.70:
+                        label = "キャメル"
+                    else:
+                        label = "ベージュ"
+                elif 45 <= h_deg < 75:
+                    label = "マスタード" if v < 0.65 else "イエロー"
+                elif 75 <= h_deg < 165:
+                    if s < 0.40 and v < 0.55:
+                        label = "オリーブカーキ"
+                    elif v > 0.65:
+                        label = "セージグリーン"
+                    else:
+                        label = "グリーン"
+                elif 165 <= h_deg < 210:
+                    label = "サックスブルー" if v > 0.65 else "ブルー"
+                elif 210 <= h_deg < 265:
+                    label = "ネイビー" if v < 0.48 else "ブルー"
+                elif 265 <= h_deg < 345:
+                    label = "パープル"
+                else:
+                    label = "ブラック"
+
+            color_votes[label] = color_votes.get(label, 0) + 1
+
+        sorted_colors = sorted(color_votes.items(), key=lambda x: x[1], reverse=True)
+        results = [col for col, count in sorted_colors if count >= total_pixels * 0.10][:max_colors]
+        return results if results else ["ブラック"]
+    except Exception as exc:
+        log_structured("WARNING", "Deterministic color extraction fallback", error=str(exc))
+        return ["ブラック"]
+
+
 class _GeminiOutfitItem(BaseModel):
     candidate_index: int = Field(description="渡された候補リストのインデックス")
     title: str = Field(description="魅力的で簡潔なコーディネート名（18文字以内）")
-    reason: str = Field(description="予定(TPO)・色彩調和・死蔵服活用の観点からの推薦理由（90文字以内）")
+    reason: str = Field(description="予定(TPO)・色彩調和・眠っている服活用の観点からの推薦理由（90文字以内）")
     weather_advice: str = Field(description="時間帯別の寒暖差や雨・風に対するワンポイント助言（60文字以内）")
 
 
@@ -97,59 +169,104 @@ def analyze_clothing_image(
         except Exception as exc:
             log_structured("WARNING", "Vertex AI image analysis fallback triggered", error=str(exc))
 
-    # ローカル・デモ環境用の高精度ヒューリスティック解析フォールバック
+    # ローカル・デモ環境用の非AI・高精度ヒューリスティック解析
+    detected_colors = extract_dominant_colors_from_image(image_bytes)
+    primary_color = detected_colors[0] if detected_colors else "ブラック"
+
     lower_name = filename.lower()
-    if any(k in lower_name for k in ["coat", "jacket", "outer", "cardigan", "コート", "ジャケット"]):
+    if any(k in lower_name for k in ["coat", "jacket", "outer", "cardigan", "コート", "ジャケット", "ブルゾン", "羽織"]):
         return AnalyzeClothingResponse(
-            suggested_name="ウールブレンド・テーラードコート",
+            suggested_name=f"{primary_color}のウールコート",
             category="outer",
             subtype="coat",
-            colors=["キャメル", "ブラウン"],
+            colors=detected_colors,
             formality=4,
-            clo_value=0.48,
+            clo_value=0.50,
             water_resistant=False,
             style_tags=["clean", "minimal", "autumn"],
             embedding_dimensions=embedding_dim,
-            analysis_source="local-multimodal-simulator",
+            analysis_source="pillow-cv-deterministic-extractor",
         )
-    if any(k in lower_name for k in ["pant", "denim", "skirt", "slacks", "パンツ", "デニム"]):
+    if any(k in lower_name for k in ["pant", "denim", "skirt", "slacks", "パンツ", "デニム", "ズボン", "スラックス"]):
         return AnalyzeClothingResponse(
-            suggested_name="センタープレス・ワイドスラックス",
+            suggested_name=f"{primary_color}のテーパードスラックス",
             category="bottom",
             subtype="slacks",
-            colors=["チャコールグレー"],
+            colors=detected_colors,
             formality=4,
             clo_value=0.24,
             water_resistant=False,
             style_tags=["clean", "smart-casual"],
             embedding_dimensions=embedding_dim,
-            analysis_source="local-multimodal-simulator",
+            analysis_source="pillow-cv-deterministic-extractor",
         )
-    if any(k in lower_name for k in ["shoe", "sneaker", "boot", "loafer", "靴", "スニーカー"]):
+    if any(k in lower_name for k in ["shoe", "sneaker", "boot", "loafer", "靴", "スニーカー", "シューズ"]):
+        is_water = any(k in lower_name for k in ["water", "rain", "雨", "撥水", "gore"])
         return AnalyzeClothingResponse(
-            suggested_name="撥水レザー・ローファー",
+            suggested_name=f"{primary_color}のレザーシューズ",
             category="shoes",
             subtype="loafer",
-            colors=["ブラック"],
+            colors=detected_colors,
             formality=4,
             clo_value=0.05,
-            water_resistant=True,
-            style_tags=["clean", "rain-ready"],
+            water_resistant=is_water,
+            style_tags=["clean", "rain-ready" if is_water else "minimal"],
             embedding_dimensions=embedding_dim,
-            analysis_source="local-multimodal-simulator",
+            analysis_source="pillow-cv-deterministic-extractor",
         )
+    if any(k in lower_name for k in ["shirt", "ワイシャツ", "シャツ", "ブラウス"]):
+        return AnalyzeClothingResponse(
+            suggested_name=f"{primary_color}のドレスシャツ",
+            category="top",
+            subtype="shirt",
+            colors=detected_colors,
+            formality=4,
+            clo_value=0.25,
+            water_resistant=False,
+            style_tags=["clean", "office"],
+            embedding_dimensions=embedding_dim,
+            analysis_source="pillow-cv-deterministic-extractor",
+        )
+
+    # 一般写真（ファイル名にヒントがないスマートフォン実写写真など）
     return AnalyzeClothingResponse(
-        suggested_name="メリノウール・クルーネックニット",
+        suggested_name=f"{primary_color}のクルーネックニット",
         category="top",
         subtype="knit",
-        colors=["セージグリーン"],
+        colors=detected_colors,
         formality=3,
         clo_value=0.34,
         water_resistant=False,
-        style_tags=["clean", "minimal", "layered"],
+        style_tags=["clean", "minimal", "warm"],
         embedding_dimensions=embedding_dim,
-        analysis_source="local-multimodal-simulator",
+        analysis_source="pillow-cv-deterministic-extractor",
     )
+
+
+def determine_umbrella_advice(
+    weather: WeatherSnapshot,
+    destination: str | None = None,
+) -> tuple[Literal["none", "folding", "umbrella"], str]:
+    """降水確率・天候コンディション・移動先の場所から実用的な傘アドバイスを判定する。"""
+    prob = weather.rain_probability
+    cond = weather.condition_label
+    wind = weather.wind_speed_ms
+    dest_str = f"（行く場所: {destination}）" if destination else ""
+
+    # 1. 長傘推奨: 降水確率 60%以上、または大雨・横殴りの雨
+    if prob >= 0.60 or ("雨" in cond and prob >= 0.50):
+        if wind >= 5.0:
+            return "umbrella", f"しっかりした雨と強風({wind}m/s)が予想されます{dest_str}。耐風性のある長傘をお持ちください。"
+        return "umbrella", f"まとまった雨が予想されます{dest_str}。長傘とお足元（撥水加工の靴等）の対策が安心です。"
+
+    # 2. 折りたたみ傘推奨: 降水確率 30%〜59%、または「一時雨」「夕方から雨」、または移動先がある
+    if prob >= 0.30 or any(k in cond for k in ["一時雨", "にわか雨", "夕方", "曇り一時雨"]):
+        if prob >= 0.45:
+            return "folding", f"急な雨や移動時の備えに{dest_str}、折りたたみ傘をバッグに入れておくと安心です。"
+        return "folding", f"降水確率{int(prob * 100)}%です{dest_str}。念のため軽量な折りたたみ傘を持参するのがおすすめです。"
+
+    # 3. 傘不要: 降水確率 30%未満
+    return "none", f"一日を通して雨の心配はほぼありません{dest_str}。傘を持たずに身軽にお出かけできます。"
 
 
 def rerank_and_explain_outfits(
@@ -158,6 +275,7 @@ def rerank_and_explain_outfits(
     activities: list[SanitizedActivity],
     target_clo_min: float,
     target_clo_max: float,
+    destination_location: str | None = None,
 ) -> tuple[list[OutfitProposal], str]:
     """
     Stage 3:
@@ -182,6 +300,8 @@ def rerank_and_explain_outfits(
 
     if not diverse_pool:
         diverse_pool = scored_candidates[:3]
+
+    umb_type, umb_advice = determine_umbrella_advice(weather, destination_location)
 
     if settings.enable_vertex_ai and settings.gcp_project_id and diverse_pool:
         try:
@@ -209,6 +329,8 @@ def rerank_and_explain_outfits(
             ]
             prompt_payload = {
                 "weather": weather.model_dump(),
+                "destination": destination_location,
+                "umbrella_advice": umb_advice,
                 "target_clo_range": [target_clo_min, target_clo_max],
                 "sanitized_schedule": [a.model_dump() for a in activities],
                 "candidates": compact_candidates,
@@ -246,6 +368,8 @@ def rerank_and_explain_outfits(
                             revived_dormant_ids=chosen["revived_ids"],
                             reason=sel.reason,
                             weather_advice=sel.weather_advice,
+                            umbrella_type=umb_type,
+                            umbrella_advice=umb_advice,
                             score_breakdown=chosen["breakdown"],
                         )
                     )
@@ -269,29 +393,38 @@ def rerank_and_explain_outfits(
     act_names = list(dict.fromkeys(activity_labels.get(a.activity_type, "予定") for a in activities))
     schedule_phrase = "から".join(act_names[:2]) if len(act_names) >= 2 else act_names[0]
 
-    style_Archetypes = [
-        "知的なきれいめレイヤード",
-        "抜け感のあるスマートスタイル",
-        "軽快なこなれ着回しスタイル",
-    ]
-
     for idx, chosen in enumerate(diverse_pool[:3]):
         items = chosen["items"]
         breakdown: ScoreBreakdown = chosen["breakdown"]
         revived_ids: list[str] = chosen["revived_ids"]
         outer = next((i for i in items if i.category == "outer"), None)
-        colors = [i.colors[0] for i in items if i.colors]
-        color_summary = "×".join(dict.fromkeys(colors[:3]))
+        top = next((i for i in items if i.category == "top"), None)
+        palette_name = chosen.get("palette_name") or "調和のスタイリング"
+        color_summary = chosen.get("color_summary") or " × ".join(dict.fromkeys(i.colors[0] for i in items if i.colors))
 
+        dormant_item = None
         dormant_note = ""
         if revived_ids:
             dormant_item = next((i for i in items if i.id in revived_ids), None)
             if dormant_item:
                 dormant_note = f" {dormant_item.days_since_last_worn}日間眠っていた「{dormant_item.name}」を新鮮に活かせる組み合わせです。"
 
+        # 動的なコーディネートタイトル生成（非AI・色彩パレット×主役アイテム×TPO連動）
+        hero_item = outer or top
+        hero_short = hero_item.name.split("・")[-1] if hero_item else "スタイル"
+        if idx == 0:
+            title = f"{palette_name}の{hero_short}"
+        elif idx == 1:
+            title = f"{schedule_phrase}に映える{palette_name}"
+        else:
+            if dormant_item:
+                title = f"{dormant_item.name.split('・')[-1]}のこなれ着回し"
+            else:
+                title = f"軽快な{palette_name}"
+
         reason = (
             f"本日の「{schedule_phrase}」に合うフォーマル度を保ちつつ、"
-            f"{color_summary}の配色で上品に統一しました。{dormant_note}"
+            f"{palette_name}（{color_summary}）で洗練された印象にまとめました。{dormant_note}"
         )
 
         temp_gap = round(weather.afternoon_temp_c - weather.evening_temp_c, 1)
@@ -313,15 +446,17 @@ def rerank_and_explain_outfits(
         proposals.append(
             OutfitProposal(
                 rank=idx + 1,
-                title=style_Archetypes[idx % len(style_Archetypes)],
+                title=title,
                 item_ids=[i.id for i in items],
                 items=items,
                 total_clo=chosen["total_clo"],
                 revived_dormant_ids=revived_ids,
                 reason=reason,
                 weather_advice=weather_advice,
+                umbrella_type=umb_type,
+                umbrella_advice=umb_advice,
                 score_breakdown=breakdown,
             )
         )
 
-    return proposals, "hybrid-rule-stylist (vertex-ready)"
+    return proposals, "hybrid-physics-color-engine (0 tokens)"

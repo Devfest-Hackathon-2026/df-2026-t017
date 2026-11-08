@@ -1,11 +1,12 @@
 "use client";
 
 import React, { useRef, useState } from "react";
-import { ArrowUp, Camera } from "lucide-react";
+import { ArrowUp, Camera, MapPin } from "lucide-react";
 
 interface ChatComposerProps {
   onSendMessage: (text: string) => void;
   onSendPhoto: (file: File) => void;
+  onGetLocation?: () => void;
   onSelectChip: (chipText: string) => void;
   suggestedChips: string[];
   disabled?: boolean;
@@ -14,6 +15,7 @@ interface ChatComposerProps {
 export function ChatComposer({
   onSendMessage,
   onSendPhoto,
+  onGetLocation,
   onSelectChip,
   suggestedChips,
   disabled = false,
@@ -80,13 +82,26 @@ export function ChatComposer({
               <Camera className="h-4.5 w-4.5" />
             </button>
 
+            {/* 現在地取得ボタン（チャットから直接位置情報同期） */}
+            {onGetLocation && (
+              <button
+                type="button"
+                onClick={onGetLocation}
+                disabled={disabled}
+                title="現在地の天気を同期"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-zinc-500 hover:bg-zinc-100 hover:text-amber-600 transition active:scale-95 disabled:opacity-40 cursor-pointer"
+              >
+                <MapPin className="h-4.5 w-4.5" />
+              </button>
+            )}
+
             {/* 入力エリア: text-base (16px) でiOS Safariの自動ズームを完全防止 */}
             <div className="relative flex-1 min-w-0">
               <input
                 type="text"
                 value={inputText}
                 onChange={(e) => setInputText(e.target.value)}
-                placeholder="メッセージを入力..."
+                placeholder="相談・服の追加・場所変更（例: 横浜に行く、現在地）..."
                 disabled={disabled}
                 className="w-full bg-transparent px-1 py-1.5 text-base sm:text-sm text-zinc-900 placeholder:text-zinc-400 focus:outline-none disabled:text-zinc-400"
               />

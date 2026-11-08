@@ -27,11 +27,19 @@ export interface WeatherSnapshot {
   condition_label: string;
 }
 
+export interface EventWeather {
+  temp_c: number;
+  rain_probability: number;
+  condition: string;
+  icon_type: "sun" | "cloud" | "rain" | "moon";
+}
+
 export interface RawCalendarEvent {
   start_time: string;
   end_time: string;
   title: string;
   location?: string | null;
+  weather?: EventWeather | null;
 }
 
 export interface SanitizedActivity {
@@ -43,8 +51,11 @@ export interface SanitizedActivity {
 
 export interface UserProfile {
   cold_sensitivity: number;
+  personal_clo_offset?: number;
+  feedback_count?: number;
   preferred_styles: string[];
   banned_item_ids: string[];
+  home_location?: string | null;
 }
 
 export interface ScoreBreakdown {
@@ -52,6 +63,7 @@ export interface ScoreBreakdown {
   vector_style_similarity: number;
   dormancy_revival_score: number;
   tpo_formality_fit: number;
+  color_harmony_score?: number;
   total_score: number;
 }
 
@@ -64,6 +76,8 @@ export interface OutfitProposal {
   revived_dormant_ids: string[];
   reason: string;
   weather_advice: string;
+  umbrella_type?: "none" | "folding" | "umbrella";
+  umbrella_advice?: string;
   score_breakdown: ScoreBreakdown;
 }
 
@@ -73,11 +87,26 @@ export interface PipelineTrace {
   stage1_physics_passed: number;
   target_clo_min: number;
   target_clo_max: number;
+  personal_clo_offset?: number;
   average_mets: number;
   required_formality: number;
   sanitized_activities: SanitizedActivity[];
   inference_engine: string;
   latency_ms: number;
+}
+
+export interface ComfortFeedbackRequest {
+  feedback: "cold" | "optimal" | "warm";
+  worn_item_ids: string[];
+  actual_total_clo: number;
+  weather_temp_c?: number | null;
+}
+
+export interface ComfortFeedbackResponse {
+  updated_offset: number;
+  feedback_count: number;
+  message: string;
+  storage_source: string;
 }
 
 export interface RecommendResponse {
@@ -128,8 +157,12 @@ export type ChatIntentType =
   | "swap_item"
   | "search_wardrobe"
   | "update_weather"
+  | "get_current_location"
+  | "set_home_location"
+  | "reset_to_home"
   | "update_sensitivity"
   | "add_event"
+  | "show_schedule"
   | "open_closet"
   | "general_reply";
 
@@ -198,6 +231,28 @@ export interface ChatAttachmentCalendarSaved {
   title: string;
   htmlLink?: string;
   templateUrl?: string;
+  outfit?: OutfitProposal;
+}
+
+export interface ChatAttachmentLocationSettings {
+  type: "location_settings";
+  weather: WeatherSnapshot;
+  homeLocation?: string | null;
+  destinationLocation?: string | null;
+  umbrellaType?: "none" | "folding" | "umbrella";
+  umbrellaAdvice?: string;
+}
+
+export interface ChatAttachmentScheduleSettings {
+  type: "schedule_settings";
+  events: RawCalendarEvent[];
+  gcalStatus: "disconnected" | "connected_real" | "connected_demo";
+  isGCalLoading?: boolean;
+}
+
+export interface ChatAttachmentWardrobe {
+  type: "wardrobe_view";
+  initialCategory?: ClothingCategory | "all";
 }
 
 export type ChatAttachment =
@@ -206,7 +261,10 @@ export type ChatAttachment =
   | ChatAttachmentClothingDraft
   | ChatAttachmentSwapCandidates
   | ChatAttachmentSearchResults
-  | ChatAttachmentCalendarSaved;
+  | ChatAttachmentCalendarSaved
+  | ChatAttachmentLocationSettings
+  | ChatAttachmentScheduleSettings
+  | ChatAttachmentWardrobe;
 
 export interface ChatMessage {
   id: string;

@@ -161,15 +161,67 @@ def resolve_chat_intent(payload: ChatIntentRequest) -> ChatIntentResponse:
             intent_source="tier1-deterministic-rule",
         )
 
-    # --- Tier 1-C: 天気・都市変更 ---
-    cities = ["東京", "渋谷", "横浜", "大阪", "梅田", "京都", "名古屋", "福岡", "天神", "札幌", "仙台"]
+    # --- Tier 1-C: 天気・都市・現在地・居住区変更 ---
+    # 1. GPS現在地
+    if any(k in lower for k in ["現在地", "いまいる場所", "今いる場所", "今いるところ", "いまいるとこ", "今ここ", "位置情報取得", "位置情報更新", "gps"]):
+        return ChatIntentResponse(
+            intent="get_current_location",
+            assistant_message="現在地の位置情報（GPS）を取得して、ピンポイントの気象データと実効気温を反映します。",
+            suggested_chips=["今日のコーデを見る", "傘の確認", "居住区に戻す"],
+            intent_source="tier1-deterministic-rule",
+        )
+
+    # 2. 居住区に戻す
+    if any(k in lower for k in ["居住区に戻", "自宅に戻", "自宅の天気", "家の天気", "家に帰", "居住区の天気"]):
+        return ChatIntentResponse(
+            intent="reset_to_home",
+            assistant_message="デフォルト居住区の天気に戻してコーディネートを再計算します。",
+            suggested_chips=["今日のコーデを見る", "現在地にする", "予定を確認"],
+            intent_source="tier1-deterministic-rule",
+        )
+
+    # 3. 居住区に設定
+    home_match = re.search(r'([一-龠ぁ-んァ-ヶa-zA-Z0-9・ー]+?)(?:を|に)?(?:居住区|自宅|マイエリア)(?:に設定|にして|として登録|登録)', raw)
+    if home_match:
+        target_loc = home_match.group(1).replace("を", "").replace("に", "").strip()
+        if target_loc:
+            return ChatIntentResponse(
+                intent="set_home_location",
+                location_query=target_loc,
+                assistant_message=f"「{target_loc}」をデフォルト居住区に設定します。",
+                suggested_chips=["この地域の天気を見る", "今日のコーデを見る"],
+                intent_source="tier1-deterministic-rule",
+            )
+    if any(k in lower for k in ["ここを居住区", "ここを自宅", "現在地を居住区", "居住区に設定"]):
+        return ChatIntentResponse(
+            intent="set_home_location",
+            location_query=None,  # 現在の場所を居住区に設定
+            assistant_message="現在の場所をデフォルト居住区に設定します。",
+            suggested_chips=["今日のコーデを見る", "予定を確認"],
+            intent_source="tier1-deterministic-rule",
+        )
+
+    # 4. 天気・都市変更 (パターンマッチ & 主要都市)
+    loc_match = re.search(r'(?:場所[をは]|天気[をは]|行き先[をは]|)([一-龠ぁ-んァ-ヶa-zA-Z0-9・ー]{2,10})(?:の天気|の気温|にして|に変えて|に変更|に行く|に行きます|で過ごす)', raw)
+    if loc_match:
+        found_loc = loc_match.group(1).strip()
+        if found_loc not in ["今日", "明日", "昨日", "これ", "それ", "コーデ", "洋服", "服", "スニーカー", "アウター", "靴", "全体"]:
+            return ChatIntentResponse(
+                intent="update_weather",
+                assistant_message=f"{found_loc}の最新気象データを取得し、気温・寒暖差に合わせた断熱性（Clo値）で提案を再計算します。",
+                location_query=found_loc,
+                suggested_chips=["今日のコーデを見る", "傘の確認", "現在地に戻す"],
+                intent_source="tier1-deterministic-rule",
+            )
+
+    cities = ["東京", "渋谷", "新宿", "銀座", "横浜", "大阪", "梅田", "難波", "京都", "烏丸", "名古屋", "福岡", "天神", "博多", "札幌", "仙台", "那覇", "金沢", "世田谷"]
     for city in cities:
-        if city in raw and any(k in lower for k in ["天気", "気温", "にして", "に変えて", "で", "行"]):
+        if city in raw and any(k in lower for k in ["天気", "気温", "にして", "に変えて", "で", "行", "いる"]):
             return ChatIntentResponse(
                 intent="update_weather",
                 assistant_message=f"{city}の最新気象データを取得し、気温・寒暖差に合わせた断熱性（Clo値）で提案を再計算します。",
                 location_query=city,
-                suggested_chips=["✨ コーデを再提案", "予定を確認", "寒がりに設定"],
+                suggested_chips=["今日のコーデを見る", "傘の確認", "現在地に戻す"],
                 intent_source="tier1-deterministic-rule",
             )
 
@@ -199,13 +251,37 @@ def resolve_chat_intent(payload: ChatIntentRequest) -> ChatIntentResponse:
             intent_source="tier1-deterministic-rule",
         )
 
-    # --- Tier 1-E: 死蔵衣類ブースト・スタイル変更 ---
+    # --- Tier 1-E: 眠っている服ブースト・スタイル・日常シーン変更 ---
     if any(k in lower for k in ["死蔵", "眠っている服", "タンス", "着てない服", "久しぶり", "活用"]):
         return ChatIntentResponse(
             intent="recommend",
-            assistant_message="クローゼットで30日以上袖を通されていない「死蔵衣類」を優先的に発掘し、今日の天候・予定に合わせた新しい着回しを提案します！",
+            assistant_message="クローゼットで30日以上袖を通されていない「眠っている服」を優先的に発掘し、今日の天候・予定に合わせた新しい着回しを提案します！",
             preferred_styles=["dormancy_revival"],
             suggested_chips=["今日これを着る", "靴だけ変える", "クローゼット一覧"],
+            intent_source="tier1-deterministic-rule",
+        )
+    if any(k in lower for k in ["デート", "ディナー", "会食", "合コン", "女子会"]):
+        return ChatIntentResponse(
+            intent="recommend",
+            assistant_message="好印象で上品な清潔感のあるスタイリングを優先してコーディネートを構成します。",
+            preferred_styles=["clean", "smart-casual"],
+            suggested_chips=["今日これを着る", "靴を変える", "アウターを変える"],
+            intent_source="tier1-deterministic-rule",
+        )
+    if any(k in lower for k in ["就活", "面接", "インターン", "商談", "プレゼン", "登壇"]):
+        return ChatIntentResponse(
+            intent="recommend",
+            assistant_message="フォーマル度を高め、誠実でスマートなビジネススタイルで再計算します。",
+            preferred_styles=["office", "clean"],
+            suggested_chips=["今日これを着る", "靴を変える"],
+            intent_source="tier1-deterministic-rule",
+        )
+    if any(k in lower for k in ["バイト", "アルバイト", "通学", "大学", "授業"]):
+        return ChatIntentResponse(
+            intent="recommend",
+            assistant_message="動きやすさと清潔感を両立した、デイリーにぴったりの組み合わせです。",
+            preferred_styles=["clean", "casual"],
+            suggested_chips=["今日これを着る", "スニーカーにする"],
             intent_source="tier1-deterministic-rule",
         )
     if any(k in lower for k in ["きれいめ", "フォーマル", "オフィス", "きっちり"]):
@@ -216,12 +292,24 @@ def resolve_chat_intent(payload: ChatIntentRequest) -> ChatIntentResponse:
             suggested_chips=["今日これを着る", "カジュアルにする"],
             intent_source="tier1-deterministic-rule",
         )
-    if any(k in lower for k in ["カジュアル", "ラフ", "リラックス", "休日"]):
+    if any(k in lower for k in ["カジュアル", "ラフ", "リラックス", "休日", "散歩"]):
         return ChatIntentResponse(
             intent="recommend",
             assistant_message="リラックス感のあるカジュアルスタイルを優先して再計算します。",
             preferred_styles=["casual", "relaxed"],
             suggested_chips=["今日これを着る", "きれいめにする"],
+            intent_source="tier1-deterministic-rule",
+        )
+    if any(k in lower for k in ["今日何着る", "何着よう", "コーデ教えて", "おすすめ", "提案して", "服決めて", "明日のコーデ", "明日何着る", "コーデ見せて", "コーデを見る", "新しい基準"]):
+        msg = (
+            "あなたの新しい体感学習基準を反映し、最適なコーディネートを算出しました！"
+            if any(k in lower for k in ["明日のコーデ", "明日何着る", "新しい基準"])
+            else "気象データ・寒暖差・カレンダー予定に合わせて、最適なコーディネートを算出しました！"
+        )
+        return ChatIntentResponse(
+            intent="recommend",
+            assistant_message=msg,
+            suggested_chips=["今日これを着る", "眠っている服を優先", "靴だけ変える"],
             intent_source="tier1-deterministic-rule",
         )
 
@@ -239,6 +327,15 @@ def resolve_chat_intent(payload: ChatIntentRequest) -> ChatIntentResponse:
             assistant_message=f"「{raw}」の気分に合う服を、Vertex AI 1408次元ベクトル類似度で検索しました。",
             search_query=raw,
             suggested_chips=["クローゼットを開く", "今日のコーデを見る"],
+            intent_source="tier1-deterministic-rule",
+        )
+
+    # --- Tier 1-G: 予定確認・スケジュール ---
+    if any(k in lower for k in ["予定", "スケジュール", "カレンダー", "今日の予定", "予定見せて", "予定教えて", "今日のスケジュール"]):
+        return ChatIntentResponse(
+            intent="show_schedule",
+            assistant_message="本日の予定一覧です。ここから予定の確認・追加やGoogleカレンダーとの同期ができます。",
+            suggested_chips=["今日のコーデを見る", "現在地にする", "服を確認する"],
             intent_source="tier1-deterministic-rule",
         )
 

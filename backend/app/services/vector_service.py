@@ -102,27 +102,16 @@ def compute_vector_and_dormancy_scores(
 ) -> tuple[float, float, list[str]]:
     """
     Stage 2:
-    1) ユーザーの好みスタイルベクトルと各衣服ベクトルのコサイン類似度およびアイテム間調和度を算出
+    1) ユーザーの好みスタイルタグ（例: "clean", "office", "casual"）との整合度を算出
     2) 死蔵衣類（30日以上未着用）の再活用ブースト & 直近着用アイテムの重複ペナルティを算出
     """
-    pref_vec = np.array(
-        _deterministic_style_embedding(" ".join(preferred_styles + ["harmonious", "stylish"])),
-        dtype=np.float32,
-    )
+    # ユーザー嗜好スタイルタグとの客観的合致率（擬似乱数ではなく決定論的タグ一致）
+    pref_set = set(s.strip().lower() for s in preferred_styles if s.strip())
+    if not pref_set:
+        pref_set = {"clean", "minimal"}
 
-    item_vecs: list[np.ndarray] = []
-    for item in items:
-        if item.embedding and len(item.embedding) == EMBEDDING_DIM:
-            v = np.array(item.embedding, dtype=np.float32)
-        else:
-            desc = " ".join([item.category, item.subtype] + item.colors + item.style_tags)
-            v = np.array(_deterministic_style_embedding(desc), dtype=np.float32)
-        item_vecs.append(v)
-
-    # ユーザー嗜好ベクトルとの平均コサイン類似度 (0..1 にスケーリング)
-    sims = [float(np.dot(pref_vec, v)) for v in item_vecs]
-    raw_sim = sum(sims) / max(1, len(sims))
-    vector_style_similarity = round(min(1.0, max(0.35, 0.58 + raw_sim * 0.85)), 3)
+    matched_count = sum(1 for item in items if any(t.lower() in pref_set for t in item.style_tags))
+    style_similarity = round(min(1.0, max(0.5, 0.6 + (matched_count / max(1, len(items))) * 0.4)), 3)
 
     # 死蔵衣類（30日以上未着用）の発掘スコア計算
     revived_ids = [i.id for i in items if i.days_since_last_worn >= 30]
@@ -136,7 +125,7 @@ def compute_vector_and_dormancy_scores(
             dormancy_scores.append(boost)
 
     dormancy_revival_score = round(sum(dormancy_scores) / max(1, len(dormancy_scores)), 3)
-    return vector_style_similarity, dormancy_revival_score, revived_ids
+    return style_similarity, dormancy_revival_score, revived_ids
 
 
 def search_wardrobe_by_text(

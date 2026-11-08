@@ -127,28 +127,41 @@ def calculate_target_clo_range(
     weather: WeatherSnapshot,
     activities: list[SanitizedActivity],
     profile: UserProfile,
+    events: list[RawCalendarEvent] | None = None,
 ) -> tuple[float, float, float]:
     """
     被服気候学（ISO 7730 / ASHRAE 55 簡易熱平衡モデル）に基づき、
-    時間帯別気温・風速による対流熱伝達・身体活動代謝量(METs)・個人の寒暖感受性から
-    目標 Clo 値レンジ (clo_min, clo_max, avg_mets) を決定論的に算出する。
-
-    基準目安:
-      26℃前後 -> 約 0.30 - 0.45 Clo (Tシャツ+薄手パンツ)
-      18℃前後 -> 約 0.60 - 0.85 Clo (長袖シャツ/ニット+パンツ+軽羽織)
-      10℃前後 -> 約 0.95 - 1.35 Clo (ニット+パンツ+コート/ジャケット)
+    1) 予定時間帯・移動先のピンポイント気象
+    2) 風速による対流熱伝達
+    3) 身体活動代謝量(METs)
+    4) 個人の寒暖感受性 + フィードバック自己補正値 (personal_clo_offset)
+    から目標 Clo 値レンジ (clo_min, clo_max, avg_mets) を決定論的に算出する。
     """
-    # 朝・昼・夜の重み付き基準体感温度（帰りの夜冷えリスクを重視）
-    weighted_temp = (
-        0.25 * weather.morning_temp_c
-        + 0.35 * weather.afternoon_temp_c
-        + 0.40 * weather.evening_temp_c
-    )
-    # 風速による体感温度低下補正（ミスナール簡易近似: 風速1m/sごとに約0.6℃低下相当）
+    # 1. 予定時間帯ごとのピンポイント天気が存在する場合は、実際の外出・行動時間帯の気温を優先
+    event_temps: list[float] = []
+    if events:
+        for ev in events:
+            if ev.weather and ev.weather.temp_c is not None:
+                event_temps.append(ev.weather.temp_c)
+
+    if event_temps:
+        # 最低気温（夜冷え・寒風リスク）を最重視した実効温度計算
+        min_temp = min(event_temps)
+        avg_event_temp = sum(event_temps) / len(event_temps)
+        weighted_temp = 0.65 * min_temp + 0.35 * avg_event_temp
+    else:
+        # 朝・昼・夜の重み付き基準体感温度（帰りの夜冷えリスク重視）
+        weighted_temp = (
+            0.25 * weather.morning_temp_c
+            + 0.35 * weather.afternoon_temp_c
+            + 0.40 * weather.evening_temp_c
+        )
+
+    # 風速による体感温度低下補正（ミスナール簡易近似: 風速1m/sごとに約0.55℃低下相当）
     wind_chill_penalty = max(0.0, (weather.wind_speed_ms - 1.0) * 0.55)
     effective_temp = weighted_temp - wind_chill_penalty
 
-    avg_mets = sum(a.estimated_mets for a in activities) / len(activities)
+    avg_mets = sum(a.estimated_mets for a in activities) / max(1, len(activities))
 
     # 快適基準温度(24.5℃)からの差分に対する必要断熱量 (1℃低下あたり +0.048 Clo)
     base_clo = 0.36 + (24.5 - effective_temp) * 0.048
@@ -159,13 +172,15 @@ def calculate_target_clo_range(
     # ユーザーの寒がり(+1)/暑がり(-1)補正
     sensitivity_adjustment = profile.cold_sensitivity * 0.12
 
-    center_clo = max(0.22, min(1.65, base_clo + mets_adjustment + sensitivity_adjustment))
+    # 体感フィードバックから自己学習された個人断熱オフセット (-0.40 〜 +0.40 Clo)
+    feedback_offset = profile.personal_clo_offset
 
-    # 朝昼夜の寒暖差に応じた熱的快適許容バンド（PMV ±0.5 相当）
-    temp_swing = max(weather.morning_temp_c, weather.afternoon_temp_c, weather.evening_temp_c) - min(
-        weather.morning_temp_c, weather.afternoon_temp_c, weather.evening_temp_c
-    )
-    half_band = 0.11 + min(0.07, temp_swing * 0.008)
+    center_clo = max(0.20, min(1.70, base_clo + mets_adjustment + sensitivity_adjustment + feedback_offset))
+
+    # 朝昼夜・予定間の寒暖差に応じた熱的快適許容バンド（PMV ±0.5 相当）
+    all_temps = [weather.morning_temp_c, weather.afternoon_temp_c, weather.evening_temp_c] + event_temps
+    temp_swing = max(all_temps) - min(all_temps)
+    half_band = 0.11 + min(0.08, temp_swing * 0.008)
 
     clo_min = round(max(0.18, center_clo - half_band), 2)
     clo_max = round(min(1.85, center_clo + half_band), 2)
@@ -178,15 +193,21 @@ def solve_physical_combinations(
     clo_max: float,
     weather: WeatherSnapshot,
     profile: UserProfile,
+    events: list[RawCalendarEvent] | None = None,
 ) -> tuple[list[CandidateCombo], int]:
     """
     Stage 1: 決定論的制約充足ソルバー (CSP)
     1. 洗濯中・NGアイテム・雨天時の非撥水シューズ等のハード制約で足切り
     2. Top × Bottom × [Optional Outer] × Shoes の組み合わせ空間を生成
-    3. 合計Clo値（基礎空気層 +0.08 Clo 含む）が [clo_min, clo_max] に収まる候補を抽出
+    3. 合計Clo値（基礎空気層 +0.06 Clo 含む）が [clo_min, clo_max] に収まる候補を抽出
+    4. 昼夜の寒暖差が大きい日（5℃以上）は、アウター着脱によるレイヤード適応性を数理評価
     """
     banned = set(profile.banned_item_ids)
-    is_rainy = weather.rain_probability >= 0.50
+
+    # 予定ごとの降水確率も含めて雨天リスクを判定
+    event_rain_max = max((ev.weather.rain_probability for ev in events if ev.weather), default=0.0) if events else 0.0
+    effective_rain_prob = max(weather.rain_probability, event_rain_max)
+    is_rainy = effective_rain_prob >= 0.50
 
     eligible = [
         item
@@ -209,6 +230,14 @@ def solve_physical_combinations(
     center_clo = (clo_min + clo_max) / 2.0
     half_span = max(0.10, (clo_max - clo_min) / 2.0)
 
+    # 1日の寒暖差（昼夜・予定間）
+    all_temps = [weather.morning_temp_c, weather.afternoon_temp_c, weather.evening_temp_c]
+    if events:
+        for ev in events:
+            if ev.weather and ev.weather.temp_c is not None:
+                all_temps.append(ev.weather.temp_c)
+    temp_swing = max(all_temps) - min(all_temps)
+
     passed: list[CandidateCombo] = []
     all_scored: list[CandidateCombo] = []
     explored_count = 0
@@ -221,8 +250,26 @@ def solve_physical_combinations(
         raw_clo = sum(i.clo_value for i in combo_items) + 0.06
         total_clo = round(raw_clo, 2)
 
+        # アウターを脱いだ状態のインナー基礎断熱性
+        inner_clo = round(top.clo_value + bottom.clo_value + shoe.clo_value + 0.06, 2)
+
         distance = abs(total_clo - center_clo)
-        physics_fit = round(max(0.0, 1.0 - (distance / (half_span * 1.6))), 3)
+        base_fit = max(0.0, 1.0 - (distance / (half_span * 1.6)))
+
+        # 寒暖差適応性（Layering Adaptability）の評価
+        # 寒暖差が5℃以上ある日は、アウター着脱で「夜の防寒」と「昼の快適」を両立できる構成を高評価
+        if temp_swing >= 5.0:
+            if outer and inner_clo <= center_clo + 0.04:
+                layering_fit = min(1.0, base_fit + 0.06)
+            elif not outer and temp_swing >= 6.5:
+                # 寒暖差が大きいのに羽織りがない場合は調整が難しいため減点
+                layering_fit = max(0.2, base_fit - 0.06)
+            else:
+                layering_fit = base_fit
+        else:
+            layering_fit = base_fit
+
+        physics_fit = round(layering_fit, 3)
 
         candidate = CandidateCombo(
             items=combo_items,
@@ -235,7 +282,7 @@ def solve_physical_combinations(
         if clo_min <= total_clo <= clo_max:
             passed.append(candidate)
 
-    # 万一クローゼットの服が極端に少なく厳密レンジ内に0件だった場合のみ、最も熱的誤差の小さい上位6件へ安全緩和
+    # クローゼットの服が極端に少なく厳密レンジ内に0件だった場合のみ、最も熱的誤差の小さい上位6件へ安全緩和
     if not passed:
         all_scored.sort(key=lambda c: abs(c.total_clo - center_clo))
         return all_scored[:6], explored_count

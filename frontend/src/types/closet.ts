@@ -205,6 +205,8 @@ export interface ChatAttachmentOutfits {
   outfits: OutfitProposal[];
   trace?: PipelineTrace | null;
   selectedOutfitRank?: number | null;
+  weather?: WeatherSnapshot;
+  destinationLocation?: string | null;
 }
 
 export interface ChatAttachmentClothingDraft {
@@ -232,6 +234,8 @@ export interface ChatAttachmentCalendarSaved {
   htmlLink?: string;
   templateUrl?: string;
   outfit?: OutfitProposal;
+  weather?: WeatherSnapshot;
+  destinationLocation?: string | null;
 }
 
 export interface ChatAttachmentLocationSettings {

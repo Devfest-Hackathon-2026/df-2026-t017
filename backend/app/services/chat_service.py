@@ -162,6 +162,16 @@ def resolve_chat_intent(payload: ChatIntentRequest) -> ChatIntentResponse:
         )
 
     # --- Tier 1-C: 天気・都市・現在地・居住区変更 ---
+    # 0. 今日の天気・天気確認
+    if any(k in lower for k in ["今日の天気", "天気は", "天気を教え", "天気教えて", "天気の情報", "天気予報", "現在の天気", "いまの天気"]):
+        return ChatIntentResponse(
+            intent="update_weather",
+            location_query=None,
+            assistant_message="本日の気象情報とお出かけアドバイスです。",
+            suggested_chips=["今日のコーデを見る", "現在地にする", "居住区に戻す"],
+            intent_source="tier1-deterministic-rule",
+        )
+
     # 1. GPS現在地
     if any(k in lower for k in ["現在地", "いまいる場所", "今いる場所", "今いるところ", "いまいるとこ", "今ここ", "位置情報取得", "位置情報更新", "gps"]):
         return ChatIntentResponse(
@@ -205,23 +215,29 @@ def resolve_chat_intent(payload: ChatIntentRequest) -> ChatIntentResponse:
     loc_match = re.search(r'(?:場所[をは]|天気[をは]|行き先[をは]|)([一-龠ぁ-んァ-ヶa-zA-Z0-9・ー]{2,10})(?:の天気|の気温|にして|に変えて|に変更|に行く|に行きます|で過ごす)', raw)
     if loc_match:
         found_loc = loc_match.group(1).strip()
-        if found_loc not in ["今日", "明日", "昨日", "これ", "それ", "コーデ", "洋服", "服", "スニーカー", "アウター", "靴", "全体"]:
+        if found_loc not in [
+            "今日", "明日", "昨日", "これ", "それ", "コーデ", "洋服", "服",
+            "スニーカー", "ローファー", "ブーツ", "アウター", "コート", "ジャケット",
+            "カーディガン", "ダウン", "シャツ", "ニット", "パーカー", "スラックス",
+            "デニム", "チノ", "チノパン", "靴", "全体", "カジュアル", "きれいめ",
+            "フォーマル", "オフィス", "休日", "標準", "寒がり", "暑がり",
+        ]:
             return ChatIntentResponse(
                 intent="update_weather",
                 assistant_message=f"{found_loc}の最新気象データを取得し、気温・寒暖差に合わせた断熱性（Clo値）で提案を再計算します。",
                 location_query=found_loc,
-                suggested_chips=["今日のコーデを見る", "傘の確認", "現在地に戻す"],
+                suggested_chips=["今日のコーデを見る", "現在地にする", "居住区に戻す", "少し暖かくする"],
                 intent_source="tier1-deterministic-rule",
             )
 
-    cities = ["東京", "渋谷", "新宿", "銀座", "横浜", "大阪", "梅田", "難波", "京都", "烏丸", "名古屋", "福岡", "天神", "博多", "札幌", "仙台", "那覇", "金沢", "世田谷"]
+    cities = ["東京", "渋谷", "新宿", "銀座", "横浜", "大阪", "梅田", "難波", "京都", "烏丸", "名古屋", "福岡", "天神", "博多", "札幌", "仙台", "那覇", "金沢", "世田谷", "鎌倉", "神戸", "広島"]
     for city in cities:
-        if city in raw and any(k in lower for k in ["天気", "気温", "にして", "に変えて", "で", "行", "いる"]):
+        if city in raw and (raw.strip() == city or any(k in lower for k in ["天気", "気温", "にして", "に変えて", "で", "行", "いる", "場所"])):
             return ChatIntentResponse(
                 intent="update_weather",
                 assistant_message=f"{city}の最新気象データを取得し、気温・寒暖差に合わせた断熱性（Clo値）で提案を再計算します。",
                 location_query=city,
-                suggested_chips=["今日のコーデを見る", "傘の確認", "現在地に戻す"],
+                suggested_chips=["今日のコーデを見る", "現在地にする", "居住区に戻す", "少し暖かくする"],
                 intent_source="tier1-deterministic-rule",
             )
 
@@ -252,64 +268,66 @@ def resolve_chat_intent(payload: ChatIntentRequest) -> ChatIntentResponse:
         )
 
     # --- Tier 1-E: 眠っている服ブースト・スタイル・日常シーン変更 ---
+    loc_name = payload.context.location_name or "現在地"
+
     if any(k in lower for k in ["死蔵", "眠っている服", "タンス", "着てない服", "久しぶり", "活用"]):
         return ChatIntentResponse(
             intent="recommend",
-            assistant_message="クローゼットで30日以上袖を通されていない「眠っている服」を優先的に発掘し、今日の天候・予定に合わせた新しい着回しを提案します！",
+            assistant_message=f"クローゼットで30日以上袖を通されていない「眠っている服」を優先的に発掘し、【{loc_name}】の今日の天候・予定に合わせた新しい着回しを提案します！",
             preferred_styles=["dormancy_revival"],
-            suggested_chips=["今日これを着る", "靴だけ変える", "クローゼット一覧"],
+            suggested_chips=["靴だけ変える", "カジュアルにする", "少し暖かくする", "手持ちの服確認"],
             intent_source="tier1-deterministic-rule",
         )
     if any(k in lower for k in ["デート", "ディナー", "会食", "合コン", "女子会"]):
         return ChatIntentResponse(
             intent="recommend",
-            assistant_message="好印象で上品な清潔感のあるスタイリングを優先してコーディネートを構成します。",
+            assistant_message=f"好印象で上品な清潔感のあるスタイリングを優先して、【{loc_name}】の気温に合わせたコーディネートを構成します。",
             preferred_styles=["clean", "smart-casual"],
-            suggested_chips=["今日これを着る", "靴を変える", "アウターを変える"],
+            suggested_chips=["靴を変える", "アウターを変える", "少し暖かくする", "全体の提案に戻る"],
             intent_source="tier1-deterministic-rule",
         )
     if any(k in lower for k in ["就活", "面接", "インターン", "商談", "プレゼン", "登壇"]):
         return ChatIntentResponse(
             intent="recommend",
-            assistant_message="フォーマル度を高め、誠実でスマートなビジネススタイルで再計算します。",
+            assistant_message=f"フォーマル度を高め、【{loc_name}】の天候に適した誠実でスマートなビジネススタイルで再計算します。",
             preferred_styles=["office", "clean"],
-            suggested_chips=["今日これを着る", "靴を変える"],
+            suggested_chips=["靴を変える", "少し暖かくする", "全体の提案に戻る"],
             intent_source="tier1-deterministic-rule",
         )
     if any(k in lower for k in ["バイト", "アルバイト", "通学", "大学", "授業"]):
         return ChatIntentResponse(
             intent="recommend",
-            assistant_message="動きやすさと清潔感を両立した、デイリーにぴったりの組み合わせです。",
+            assistant_message=f"動きやすさと清潔感を両立した、【{loc_name}】での一日にぴったりの組み合わせです。",
             preferred_styles=["clean", "casual"],
-            suggested_chips=["今日これを着る", "スニーカーにする"],
+            suggested_chips=["スニーカーにする", "カジュアルにする", "少し暖かくする"],
             intent_source="tier1-deterministic-rule",
         )
     if any(k in lower for k in ["きれいめ", "フォーマル", "オフィス", "きっちり"]):
         return ChatIntentResponse(
             intent="recommend",
-            assistant_message="きれいめ・スマートカジュアルなスタイルを優先してコーデを再構成します。",
+            assistant_message=f"きれいめ・スマートカジュアルなスタイルを優先して、【{loc_name}】の寒暖差に合うコーデを再構成します。",
             preferred_styles=["clean", "office"],
-            suggested_chips=["今日これを着る", "カジュアルにする"],
+            suggested_chips=["カジュアルにする", "靴だけ変える", "少し暖かくする", "手持ちの服確認"],
             intent_source="tier1-deterministic-rule",
         )
-    if any(k in lower for k in ["カジュアル", "ラフ", "リラックス", "休日", "散歩"]):
+    if any(k in lower for k in ["カジュアル", "ラフ", "リラックス", "休日", "散歩", "デニム", "スウェット", "パーカー"]):
         return ChatIntentResponse(
             intent="recommend",
-            assistant_message="リラックス感のあるカジュアルスタイルを優先して再計算します。",
+            assistant_message=f"リラックス感のあるカジュアルスタイルを優先して、【{loc_name}】の天候に合わせて再計算します。",
             preferred_styles=["casual", "relaxed"],
-            suggested_chips=["今日これを着る", "きれいめにする"],
+            suggested_chips=["きれいめにする", "眠っている服を優先", "靴だけ変える", "少し暖かくする"],
             intent_source="tier1-deterministic-rule",
         )
     if any(k in lower for k in ["今日何着る", "何着よう", "コーデ教えて", "おすすめ", "提案して", "服決めて", "明日のコーデ", "明日何着る", "コーデ見せて", "コーデを見る", "新しい基準"]):
         msg = (
-            "あなたの新しい体感学習基準を反映し、最適なコーディネートを算出しました！"
+            f"あなたの新しい体感学習基準を反映し、【{loc_name}】の気象条件に最適なコーディネートを算出しました！"
             if any(k in lower for k in ["明日のコーデ", "明日何着る", "新しい基準"])
-            else "気象データ・寒暖差・カレンダー予定に合わせて、最適なコーディネートを算出しました！"
+            else f"【{loc_name}】の今日の気象データ・寒暖差・カレンダー予定に合わせて、最適なコーディネートを算出しました！"
         )
         return ChatIntentResponse(
             intent="recommend",
             assistant_message=msg,
-            suggested_chips=["今日これを着る", "眠っている服を優先", "靴だけ変える"],
+            suggested_chips=["カジュアルにする", "眠っている服を優先", "靴だけ変える", "少し暖かくする"],
             intent_source="tier1-deterministic-rule",
         )
 
@@ -375,10 +393,10 @@ def resolve_chat_intent(payload: ChatIntentRequest) -> ChatIntentResponse:
         except Exception as exc:
             log_structured("WARNING", "Tier 2 Gemini chat fallback triggered", error=str(exc))
 
-    # デフォルトフォールバック
+    # デフォルトフォールバック（汎用AI雑談ではなく、被服気候学コンシェルジュとしての決定論的ガイド応答）
     return ChatIntentResponse(
         intent="general_reply",
-        assistant_message=f"「{raw}」について承知しました！今日の気温や予定に合わせて、快適で調和のとれたコーディネートをご提案します。",
-        suggested_chips=["✨ 今日のコーデを見る", "🔥 眠っている服を優先", "📷 服を追加する"],
+        assistant_message=f"「{raw}」について承知しました！Closet Me は手持ち服データと被服気候学（Clo値）から最適解を算出する専用エンジンのため、自由対話ではなく以下のボタンや条件からご指定ください。",
+        suggested_chips=["✨ 今日のコーデを見る", "🔥 眠っている服を優先", "👟 靴を変える", "🧥 アウターを変える", "📷 服を追加する"],
         intent_source="tier1-fallback",
     )

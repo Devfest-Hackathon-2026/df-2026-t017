@@ -54,7 +54,7 @@ import {
   isGoogleAuthAvailable,
 } from "@/lib/googleCalendar";
 import { ChatMessageList } from "@/components/chat/ChatMessageList";
-import { ChatComposer } from "@/components/chat/ChatComposer";
+import { ChatComposer, ComposerFocusContext } from "@/components/chat/ChatComposer";
 import { LocationWeatherModal } from "@/components/drawers/LocationWeatherModal";
 import { CalendarDrawer } from "@/components/drawers/CalendarDrawer";
 
@@ -81,6 +81,7 @@ export default function ClosetMeChatApp() {
   const [recentWornIds, setRecentWornIds] = useState<string[]>([]);
   const [selectedOutfitRank, setSelectedOutfitRank] = useState<number | null>(null);
   const [feedbackSubmittedRank, setFeedbackSubmittedRank] = useState<number | null>(null);
+  const [activeWornOutfitForFeedback, setActiveWornOutfitForFeedback] = useState<OutfitProposal | null>(null);
   const [latestOutfits, setLatestOutfits] = useState<OutfitProposal[]>([]);
   const [latestTrace, setLatestTrace] = useState<PipelineTrace | null>(null);
 
@@ -108,12 +109,15 @@ export default function ClosetMeChatApp() {
   const isInitializedRef = useRef(false);
   const [suggestedChips, setSuggestedChips] = useState<string[]>([
     "今日のコーデを見る",
-    "現在地にする",
+    "カジュアルにする",
     "眠っている服を優先",
-    "靴だけ変える",
-    "服を登録する",
-    "カレンダー連携",
+    "今日の天気",
+    "現在地にする",
   ]);
+  const [composerOpenReq, setComposerOpenReq] = useState<{
+    context: ComposerFocusContext;
+    timestamp: number;
+  } | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -165,10 +169,26 @@ export default function ClosetMeChatApp() {
           umbrellaSentence = `急な雨や夕方に備えて、折りたたみ傘があると安心です。`;
         }
 
-        const rainText = w.rain_probability >= 0.3 ? `（降水確率 ${Math.round(w.rain_probability * 100)}%）` : "";
-        const intro = customIntroText || (
-          `おはようございます！今日の${w.location_name}は最高${w.afternoon_temp_c}℃${rainText}ですね。${ev.length > 0 ? `予定（${ev.map(e => e.title).slice(0, 2).join("・")}）と` : ""}寒暖差に合わせて、手持ちの服から3つのコーディネートを組みました。${umbrellaSentence ? `\n\n${umbrellaSentence}` : ""}`
-        );
+        const rainPct = Math.round(w.rain_probability * 100);
+        const rainPhrase = w.rain_probability >= 0.2 ? `降水確率 ${rainPct}%` : `雨の心配はほぼなし(${rainPct}%)`;
+        const destSentence = destLoc ? `（移動先: ${destLoc}）` : "";
+        const weatherHeadline = `今日の【${w.location_name}】は「${w.condition_label}」、最高${w.afternoon_temp_c}℃ / 朝晩${w.evening_temp_c}℃（${rainPhrase}）${destSentence}の予報です。`;
+
+        let intro = "";
+        if (customIntroText) {
+          if (customIntroText.includes(w.location_name) && customIntroText.includes("℃") && customIntroText.includes("予報")) {
+            intro = customIntroText;
+          } else {
+            intro = `${weatherHeadline}\n\n${customIntroText}`;
+          }
+        } else {
+          const scheduleSummary = ev.length > 0 ? `本日の予定（${ev.map((e) => e.title).slice(0, 2).join("・")}）と` : "";
+          intro = `おはようございます！${weatherHeadline}\n${scheduleSummary}時間帯ごとの寒暖差に合わせて、手持ちの服から最適な3つのコーディネートを提案します。`;
+        }
+
+        if (umbrellaSentence && !intro.includes(umbrellaSentence)) {
+          intro += `\n\n☂️ ${umbrellaSentence}`;
+        }
 
         const newMsg: ChatMessage = {
           id: `msg_${Date.now()}`,
@@ -180,17 +200,20 @@ export default function ClosetMeChatApp() {
             outfits: res.outfits,
             trace: res.trace,
             selectedOutfitRank: null,
+            weather: w,
+            destinationLocation: destLoc,
           },
         };
 
         setMessages((prev) => [...prev, newMsg]);
+        const isCasualActive = prof.preferred_styles?.includes("casual");
+        const isDormantActive = prof.preferred_styles?.includes("dormancy_revival");
         setSuggestedChips([
-          "今日これを着る",
-          "眠っている服を優先",
-          "靴だけ変える",
-          "アウターを変える",
+          isCasualActive ? "きれいめにする" : "カジュアルにする",
+          isDormantActive ? "靴だけ変える" : "眠っている服を優先",
           "少し暖かくする",
-          "服を追加する",
+          "少し涼しくする",
+          "今日の天気",
         ]);
         scrollToBottom();
       } catch (err) {
@@ -433,6 +456,12 @@ export default function ClosetMeChatApp() {
   // チャットタイムラインに「場所・気象設定カード」を展開
   const handleOpenLocationInChat = () => {
     if (!weather) return;
+    const now = new Date();
+    const month = now.getMonth() + 1;
+    const date = now.getDate();
+    const weekdays = ["日", "月", "火", "水", "木", "金", "土"];
+    const dayStr = weekdays[now.getDay()];
+
     setMessages((prev) => {
       // 直前のメッセージがすでに location_settings カードであれば二重追加しない
       const lastMsg = prev[prev.length - 1];
@@ -443,7 +472,7 @@ export default function ClosetMeChatApp() {
         id: `ast_loc_${Date.now()}`,
         sender: "assistant",
         timestamp: getNowTime(),
-        text: `現在の場所「${weather.location_name}」の天気です。変更する場合は下から選ぶか、チャットで教えてくださいね。`,
+        text: `本日（${month}月${date}日・${dayStr}曜日）の${weather.location_name}の天気情報です。`,
         attachment: {
           type: "location_settings",
           weather,
@@ -452,10 +481,11 @@ export default function ClosetMeChatApp() {
           umbrellaType: latestOutfits[0]?.umbrella_type || "none",
           umbrellaAdvice: latestOutfits[0]?.umbrella_advice,
         },
-        suggestedChips: ["📍 現在地にする", "🏡 居住区に戻す", "今日のコーデを見る"],
+        suggestedChips: ["今日のコーデを見る", "現在地にする", "自宅に戻す", "少し暖かくする"],
       };
       return [...prev, locMsg];
     });
+    setSuggestedChips(["今日のコーデを見る", "現在地にする", "自宅に戻す", "少し暖かくする"]);
     scrollToBottom();
   };
 
@@ -488,10 +518,11 @@ export default function ClosetMeChatApp() {
           gcalStatus,
           isGCalLoading,
         },
-        suggestedChips: ["今日のコーデを見る", "現在地にする", "服を確認する"],
+        suggestedChips: ["今日のコーデを見る", "今日の天気", "服を確認する"],
       };
       return [...prev, schMsg];
     });
+    setSuggestedChips(["今日のコーデを見る", "今日の天気", "服を確認する"]);
     scrollToBottom();
   };
 
@@ -516,10 +547,11 @@ export default function ClosetMeChatApp() {
           type: "wardrobe_view",
           initialCategory: category || "all",
         },
-        suggestedChips: ["今日のコーデを見る", "眠っている服を優先", "服を登録する"],
+        suggestedChips: ["今日のコーデを見る", "眠っている服を優先", "文字で服を登録", "写真を選択する"],
       };
       return [...prev, wardrobeMsg];
     });
+    setSuggestedChips(["今日のコーデを見る", "眠っている服を優先", "文字で服を登録", "写真を選択する"]);
     scrollToBottom();
   };
 
@@ -599,6 +631,13 @@ export default function ClosetMeChatApp() {
         return;
       }
 
+      // 「今日の天気」即時ハンドリング（サジェストチップやクイック発話）
+      if (text === "今日の天気" || text === "天気" || text === "現在の天気" || text === "今日の天気は？" || text === "今日の天気を教えて") {
+        setIsLoading(false);
+        handleOpenLocationInChat();
+        return;
+      }
+
       const intentRes = await interpretChatMessage({
         message: text,
         context: {
@@ -654,9 +693,13 @@ export default function ClosetMeChatApp() {
       } else if (intentRes.intent === "show_schedule") {
         // チャットからの予定確認
         handleOpenScheduleInChat();
-      } else if (intentRes.intent === "update_weather" && intentRes.location_query) {
-        // 天気都市変更
-        await handleSelectCity(intentRes.location_query);
+      } else if (intentRes.intent === "update_weather") {
+        // 天気都市変更 または 現在地天気確認
+        if (intentRes.location_query) {
+          await handleSelectCity(intentRes.location_query);
+        } else {
+          handleOpenLocationInChat();
+        }
       } else if (intentRes.intent === "update_sensitivity" && intentRes.cold_sensitivity !== undefined && intentRes.cold_sensitivity !== null) {
         // 寒がり/暑がり変更
         const nextProf = { ...profile, cold_sensitivity: intentRes.cold_sensitivity };
@@ -731,7 +774,19 @@ export default function ClosetMeChatApp() {
     }
   };
 
-  // 選択肢チップのタップ（Tier 0: LLMコスト0円で直結実行）
+  // ユーザーメッセージを即座にチャットタイムラインへ追加するヘルパー
+  const appendUserMessage = (text: string) => {
+    const userMsg: ChatMessage = {
+      id: `usr_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      sender: "user",
+      timestamp: getNowTime(),
+      text,
+    };
+    setMessages((prev) => [...prev, userMsg]);
+    scrollToBottom();
+  };
+
+  // 選択肢チップのタップ（Tier 0: LLMコスト0円で直結実行しつつ、チャットにユーザーの発言として反映）
   const handleSelectChip = async (chipText: string) => {
     if (chipText.includes("明日のコーデ") || chipText.includes("明日何着る") || chipText.includes("新しい基準") || chipText.includes("次のコーデ")) {
       handleUserSendMessage("明日のコーデを見せて");
@@ -758,45 +813,135 @@ export default function ClosetMeChatApp() {
         return;
       }
     }
-    if (chipText.includes("今日これを着る")) {
+    if (chipText.includes("今日これを着る") || chipText.includes("これを着る")) {
       if (latestOutfits.length > 0) {
         await handleWearOutfit(latestOutfits[0]);
       }
       return;
     }
     if (chipText.includes("眠っている服")) {
-      handleUserSendMessage("眠っている服を優先してコーデ組んで");
+      appendUserMessage("眠っている服を優先して");
+      // Tier 0: LLMを介さず直接死蔵復活モードで再計算
+      const nextProf = { ...profile, preferred_styles: ["dormancy_revival"] };
+      setProfile(nextProf);
+      if (weather) {
+        await executeRecommendation(
+          weather,
+          events,
+          nextProf,
+          wardrobe,
+          recentWornIds,
+          "クローゼットで30日以上袖を通されていない「眠っている服」を優先的に発掘し、今日の天候・予定に合わせた新しい着回しを提案します！"
+        );
+      }
       return;
     }
-    if (chipText.includes("靴だけ変える") || chipText.includes("スニーカー") || chipText.includes("ローファー")) {
-      handleUserSendMessage("靴を変えたい");
+    if (chipText.includes("カジュアル")) {
+      appendUserMessage("カジュアルにしたい");
+      // Tier 0: LLMを介さず直接カジュアルスタイルで再計算
+      const nextProf = { ...profile, preferred_styles: ["casual", "relaxed"] };
+      setProfile(nextProf);
+      if (weather) {
+        await executeRecommendation(
+          weather,
+          events,
+          nextProf,
+          wardrobe,
+          recentWornIds,
+          "リラックス感のあるカジュアルな服を取り入れて、今日の気温・寒暖差に合わせたコーディネートを再計算しました。"
+        );
+      }
+      return;
+    }
+    if (chipText.includes("きれいめ")) {
+      appendUserMessage("きれいめにしたい");
+      // Tier 0: LLMを介さず直接きれいめ・オフィススタイルで再計算
+      const nextProf = { ...profile, preferred_styles: ["clean", "office"] };
+      setProfile(nextProf);
+      if (weather) {
+        await executeRecommendation(
+          weather,
+          events,
+          nextProf,
+          wardrobe,
+          recentWornIds,
+          "清潔感のあるきれいめ・スマートカジュアルな組み合わせを優先して再計算しました。"
+        );
+      }
+      return;
+    }
+    if (chipText.includes("今日のコーデ") || chipText.includes("全体の提案")) {
+      appendUserMessage(chipText.includes("全体の提案") ? "全体の提案に戻して" : "今日のコーデを見せて");
+      if (weather) {
+        await executeRecommendation(weather, events, profile, wardrobe, recentWornIds);
+      }
+      return;
+    }
+    if (chipText.includes("靴だけ変える") || chipText.includes("スニーカー") || chipText.includes("ローファー") || chipText.includes("靴を変える")) {
+      appendUserMessage("靴だけ変えたい");
+      await handleOpenSwapModal(1, "shoes", latestOutfits[0]?.item_ids || []);
       return;
     }
     if (chipText.includes("アウターを変える") || chipText.includes("コート")) {
-      handleUserSendMessage("アウターを変えたい");
+      appendUserMessage("アウターを変えたい");
+      await handleOpenSwapModal(1, "outer", latestOutfits[0]?.item_ids || []);
       return;
     }
-    if (chipText.includes("少し暖かく") || chipText.includes("寒がり")) {
-      handleUserSendMessage("寒がりなので暖かくして");
+    if (chipText.includes("少し暖かく") || chipText.includes("暖かく") || chipText.includes("寒がり")) {
+      appendUserMessage("少し暖かくして");
+      // Tier 0: LLMを介さず直接体感を +1 (暖かめ) にシフトして再計算
+      const nextProf = { ...profile, cold_sensitivity: 1 };
+      setProfile(nextProf);
+      if (weather) {
+        await executeRecommendation(
+          weather,
+          events,
+          nextProf,
+          wardrobe,
+          recentWornIds,
+          "体感を「寒がり（+1）」に設定しました。目標断熱性（Clo値）を引き上げ、暖かいレイヤードを優先して再計算しました。"
+        );
+      }
       return;
     }
-    if (chipText.includes("服を登録") || chipText.includes("服を追加")) {
-      const msg: ChatMessage = {
-        id: `ast_${Date.now()}`,
-        sender: "assistant",
-        timestamp: getNowTime(),
-        text: "下のカメラボタン 📷 から服の写真を送るか、「黒のタートルネックニット追加」「撥水のローファー買った」のようにテキストを送っていただければ、被服気候学属性を抽出して登録できます！",
-        suggestedChips: ["📷 写真を選択する", "黒のニットを追加", "撥水の靴を追加"],
-      };
-      setMessages((prev) => [...prev, msg]);
-      scrollToBottom();
+    if (chipText.includes("涼しく") || chipText.includes("薄着") || chipText.includes("暑がり")) {
+      appendUserMessage("少し涼しくして");
+      // Tier 0: 直接体感を -1 (涼しめ) にシフトして再計算
+      const nextProf = { ...profile, cold_sensitivity: -1 };
+      setProfile(nextProf);
+      if (weather) {
+        await executeRecommendation(
+          weather,
+          events,
+          nextProf,
+          wardrobe,
+          recentWornIds,
+          "体感を「暑がり（-1）」に設定しました。熱がこもらない軽快な組み合わせを優先して再計算しました。"
+        );
+      }
+      return;
+    }
+    if (chipText.includes("服を登録") || chipText.includes("服を追加") || chipText.includes("文字で服を登録")) {
+      appendUserMessage("新しい服を登録したい");
+      setComposerOpenReq({ context: "clothing", timestamp: Date.now() });
+      return;
+    }
+    if (chipText.includes("都市名を自由入力") || chipText.includes("他の場所を指定")) {
+      setComposerOpenReq({ context: "location", timestamp: Date.now() });
+      return;
+    }
+    if (chipText.includes("今日の天気") || chipText.includes("場所設定") || chipText.includes("場所変更") || chipText.includes("場所カード") || chipText.includes("天気")) {
+      appendUserMessage("今日の天気を教えて");
+      handleOpenLocationInChat();
       return;
     }
     if (chipText.includes("現在地")) {
+      appendUserMessage("現在地の天気に変更して");
       handleTriggerGeolocationFromChat();
       return;
     }
     if (chipText.includes("居住区に戻す") || chipText.includes("自宅に戻す")) {
+      appendUserMessage("自宅の天気に戻して");
       if (homeLocation) {
         handleSelectCity(homeLocation);
       } else {
@@ -804,12 +949,9 @@ export default function ClosetMeChatApp() {
       }
       return;
     }
-    if (chipText.includes("カレンダー連携") || chipText.includes("予定")) {
+    if (chipText.includes("カレンダー連携") || chipText.includes("予定") || chipText.includes("スケジュール")) {
+      appendUserMessage("今日の予定を確認したい");
       handleOpenScheduleInChat();
-      return;
-    }
-    if (chipText.includes("場所設定") || chipText.includes("場所変更") || chipText.includes("場所カード")) {
-      handleOpenLocationInChat();
       return;
     }
     if (
@@ -818,11 +960,13 @@ export default function ClosetMeChatApp() {
       chipText.includes("服を確認") ||
       chipText.includes("服一覧")
     ) {
+      appendUserMessage("手持ちの服を確認したい");
       handleOpenWardrobeInChat();
       return;
     }
-    // その他のチップはそのまま自然言語として送信
-    handleUserSendMessage(chipText);
+    // その他のチップはクリーンにして自然言語として送信（ユーザー吹き出しも自動追加）
+    const cleanText = chipText.replace(/[✨🔥👟🧥🥶📷📅📍🏡😊🥵⌨️💬]/g, "").trim();
+    handleUserSendMessage(cleanText || chipText);
   };
 
   // 写真アップロード処理（チャットから手持ち服登録）
@@ -940,6 +1084,12 @@ export default function ClosetMeChatApp() {
         },
       };
       setMessages((prev) => [...prev, swapMsg]);
+      setSuggestedChips([
+        "全体の提案に戻る",
+        targetCategory === "shoes" ? "アウターを変える" : "靴だけ変える",
+        "カジュアルにする",
+        "今日の天気",
+      ]);
       scrollToBottom();
     } catch {
       setErrorMsg("差し替え候補の取得に失敗しました。");
@@ -982,6 +1132,8 @@ export default function ClosetMeChatApp() {
         outfits: updatedOutfits,
         trace: latestTrace,
         selectedOutfitRank,
+        weather: weather || undefined,
+        destinationLocation,
       },
     };
     setMessages((prev) => [...prev, appliedMsg]);
@@ -992,6 +1144,7 @@ export default function ClosetMeChatApp() {
   const handleWearOutfit = async (proposal: OutfitProposal) => {
     setSelectedOutfitRank(proposal.rank);
     setFeedbackSubmittedRank(null);
+    setActiveWornOutfitForFeedback(proposal);
     setIsCalendarSaving(true);
 
     // 1. ユーザーの発話吹き出しをチャットに追加（自然な会話体験）
@@ -999,7 +1152,7 @@ export default function ClosetMeChatApp() {
       id: `usr_wear_${Date.now()}`,
       sender: "user",
       timestamp: getNowTime(),
-      text: `今日のコーデは「${proposal.title}」にする！👔`,
+      text: `本日の装いとして「${proposal.title}」を確定しました。`,
     };
     setMessages((prev) => [...prev, userMsg]);
     scrollToBottom();
@@ -1038,6 +1191,16 @@ export default function ClosetMeChatApp() {
       proposal.weather_advice ? `気候助言: ${proposal.weather_advice}` : "",
     ].filter(Boolean);
 
+    const locName = weather?.location_name || "現在地";
+    const weatherDetail = weather
+      ? `今日の【${locName}】は「${weather.condition_label}」（最高 ${weather.afternoon_temp_c}℃ / 朝晩 ${weather.evening_temp_c}℃、降水確率 ${Math.round(weather.rain_probability * 100)}%）`
+      : `今日の【${locName}】`;
+    const destDetail = destinationLocation ? `、移動先は「${destinationLocation}」` : "";
+    const weatherAdvicePhrase = proposal.weather_advice ? `\n💡 気象アドバイス: ${proposal.weather_advice}` : "";
+    const umbrellaPhrase = proposal.umbrella_advice ? `\n☂️ 傘の目安: ${proposal.umbrella_advice}` : "";
+
+    const confirmationBody = `本日の装いとして「${proposal.title}」を決定しました！\n\n${weatherDetail}${destDetail}です。断熱性（合計 ${proposal.total_clo} Clo）も気温・寒暖差にバッチリ合っています。${weatherAdvicePhrase}${umbrellaPhrase}\n\n`;
+
     try {
       if (gcalAccessToken) {
         const res = await createGoogleCalendarOutfitEvent(gcalAccessToken, {
@@ -1049,12 +1212,14 @@ export default function ClosetMeChatApp() {
           id: `ast_cal_${Date.now()}`,
           sender: "assistant",
           timestamp: getNowTime(),
-          text: `決まりましたね！本日のコーディネート「${proposal.title}」を Google カレンダーに終日記録しました 🎉\n\n一日過ごしてみて、体感がどうだったか下のボタンから教えてくださいね（寒かった・快適・暑かった）。あなたの体感を学習して、次回の提案がどんどんあなた専用に賢くなっていきます 😊`,
+          text: `${confirmationBody}Google カレンダーの終日予定に同期しました。素敵な一日をお過ごしください✨`,
           attachment: {
             type: "calendar_saved",
             title: eventTitle,
             htmlLink: res.htmlLink,
             outfit: proposal,
+            weather: weather || undefined,
+            destinationLocation,
           },
         };
         setMessages((prev) => [...prev, savedMsg]);
@@ -1068,12 +1233,14 @@ export default function ClosetMeChatApp() {
           id: `ast_cal_${Date.now()}`,
           sender: "assistant",
           timestamp: getNowTime(),
-          text: `決まりましたね！本日のコーディネート「${proposal.title}」を記録しました 🎉\nGoogleカレンダー本体へも1クリックで追加できます。\n\n一日過ごしてみて、体感がどうだったか下のボタンから教えてくださいね（寒かった・快適・暑かった）。あなたの体感を学習して、次回の提案がどんどんあなた専用に賢くなっていきます 😊`,
+          text: `${confirmationBody}Google カレンダーへの追加リンクを発行しました。「カレンダーに追加」から登録できます✨\n\n※ Googleカレンダーと連携すると、次回から服を選ぶだけで自動登録されます。`,
           attachment: {
             type: "calendar_saved",
             title: eventTitle,
             templateUrl,
             outfit: proposal,
+            weather: weather || undefined,
+            destinationLocation,
           },
         };
         setMessages((prev) => [...prev, savedMsg]);
@@ -1082,7 +1249,13 @@ export default function ClosetMeChatApp() {
       setErrorMsg("カレンダーへの記録に失敗しました。");
     } finally {
       setIsCalendarSaving(false);
-      setSuggestedChips(["🥶 寒かった", "😊 快適だった", "🥵 暑かった"]);
+      // デッキの選択肢チップを着用後の次フェーズに最適化
+      setSuggestedChips([
+        "明日のコーデを見る",
+        "眠っている服を優先",
+        "今日の天気",
+        "クローゼットを確認",
+      ]);
       scrollToBottom();
     }
   };
@@ -1096,6 +1269,8 @@ export default function ClosetMeChatApp() {
   ) => {
     try {
       setFeedbackSubmittedRank(proposal.rank);
+      // 回答されたらフローティングフィードバックバーを閉じる
+      setActiveWornOutfitForFeedback(null);
 
       // ユーザーの発話吹き出しを追加（未追加の場合）
       if (!alreadyAddedUserMsg) {
@@ -1136,18 +1311,18 @@ export default function ClosetMeChatApp() {
       // スタイリストAIの温かみのある対話返答
       let assistantDialogue = "";
       if (feedback === "cold") {
-        assistantDialogue = `教えてくれてありがとうございます！少し肌寒かったんですね ☕\n\nあなたの体感を学習して、次回からは少し暖かめの組み合わせ（断熱性 +0.08 Clo）を優先するように調整しました 🧣\n着るたびに、あなたにぴったりのパーソナルスタイリストへ育っていきます！`;
+        assistantDialogue = `体感記録（寒冷傾向）を受け付けました。目標断熱性を +0.08 Clo に自動補正し、次回のレイヤード探索に反映します。`;
       } else if (feedback === "optimal") {
-        assistantDialogue = `よかったです！今日の気温と予定にぴったり合っていたようで嬉しいです ✨\n\nこの心地よい基準（断熱性 ±0.00 Clo）をあなたのベストバランスとして大切にキープしておきますね 😊`;
+        assistantDialogue = `体感記録（適正）を受け付けました。現在の断熱基準（±0.00 Clo）を適正レンジとして維持します。`;
       } else {
-        assistantDialogue = `教えてくれてありがとうございます！思ったより暖かくて暑かったんですね ☀️\n\n次回からはより軽快で風通しの良い組み合わせ（断熱性 -0.08 Clo）を優先するように調整しました 🌿\n次回の提案を楽しみにしていてくださいね！`;
+        assistantDialogue = `体感記録（温暖傾向）を受け付けました。目標断熱性を -0.08 Clo に自動補正し、次回の探索に反映します。`;
       }
 
       const fbMsg: ChatMessage = {
         id: `ast_fb_${Date.now()}`,
         sender: "assistant",
         timestamp: getNowTime(),
-        text: `${assistantDialogue}\n\n💡 個人学習記録: 体感オフセット ${offsetDisplay} Clo に更新（フィードバック通算 ${res.feedback_count}回目・Cloud Firestore同期済）`,
+        text: `${assistantDialogue}\n\n個人学習基準: 体感補正 ${offsetDisplay} Clo に更新（通算 ${res.feedback_count}回目・Cloud Firestore 永続同期済）`,
         suggestedChips: ["明日のコーデを見る", "眠っている服を優先", "手持ちの服を確認"],
       };
       setMessages((prev) => [...prev, fbMsg]);
@@ -1311,102 +1486,135 @@ export default function ClosetMeChatApp() {
 
   return (
     <div className="flex flex-col min-h-screen bg-[#FAF9F6] text-zinc-900 font-sans selection:bg-zinc-900 selection:text-white">
-      {/* Top Header */}
-      <header className="sticky top-0 z-30 border-b border-zinc-200/80 bg-white/95 backdrop-blur-md">
-        <div className="mx-auto flex max-w-4xl items-center justify-between px-3 py-2.5 sm:px-4 sm:py-3">
-          {/* Logo & Subtitle */}
+      {/* Top Header: 洗練された2段構成（1段目: ブランド&主要指標 / 2段目: 統合インテリジェントバー） */}
+      <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/90 backdrop-blur-md transition-all">
+        {/* メインバー */}
+        <div className="mx-auto flex max-w-4xl items-center justify-between px-3 py-2 sm:px-4 sm:py-2.5">
+          {/* Logo */}
           <div className="flex items-center gap-2.5">
-            <div className="flex h-8 w-8 sm:h-9 sm:w-9 items-center justify-center rounded-xl bg-zinc-900 text-white shadow-xs">
-              <Shirt className="h-4 w-4 sm:h-4.5 sm:w-4.5 text-zinc-100" />
+            <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-zinc-900 text-white shadow-xs">
+              <Shirt className="h-4 w-4 text-zinc-100" />
             </div>
             <div>
-              <h1 className="text-sm sm:text-base font-bold tracking-tight">Closet Me</h1>
-              <p className="text-[10px] text-zinc-500 hidden sm:block">
-                被服気候学(Clo値) × パーソナルスタイリスト
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-sm sm:text-base font-bold tracking-tight">Closet Me</h1>
+                <span className="rounded-full bg-zinc-100 px-1.5 py-0.2 text-[9px] font-bold text-zinc-600">
+                  物理CSP × 死蔵復活
+                </span>
+              </div>
+              <p className="text-[10px] text-zinc-400 hidden sm:block">
+                被服気候学(Clo値) × 決定論的スタイリスト
               </p>
             </div>
           </div>
 
-          {/* Header Action Buttons */}
-          <div className="flex items-center gap-2">
-            {/* 稼働率バッジ */}
-            <div
+          {/* クイックステータス & アクション */}
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            {/* 稼働率 */}
+            <button
               onClick={() => handleOpenWardrobeInChat()}
-              className="hidden sm:flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-700 cursor-pointer hover:bg-zinc-100 transition"
-              title="チャットでクローゼット一覧を開く"
+              className="flex items-center gap-1.5 rounded-full border border-zinc-200/80 bg-zinc-50/80 hover:bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-700 transition"
+              title="クローゼット一覧を展開"
             >
-              <span>稼働率 {utilizationRate}%</span>
-            </div>
+              <Shirt className="h-3 w-3 text-zinc-500" />
+              <span>{utilizationRate}%</span>
+              <span className="text-[10px] text-zinc-400 font-normal hidden sm:inline">稼働中</span>
+            </button>
 
-            {/* 場所・天気ボタン（チャットに気象設定カードを展開） */}
+            {/* 場所・天気 */}
             <button
               onClick={handleOpenLocationInChat}
-              className="flex items-center gap-1.5 rounded-xl border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 px-2.5 py-1 text-xs font-semibold text-zinc-800 transition shadow-2xs"
-              title="チャットで場所・気象設定を開く"
+              className="flex items-center gap-1.5 rounded-full border border-zinc-200/80 bg-white hover:bg-zinc-50 px-2.5 py-1 text-xs font-semibold text-zinc-800 transition shadow-2xs"
+              title="場所・気象設定を展開"
             >
               {homeLocation && weather?.location_name && weather.location_name.includes(homeLocation) ? (
                 <Home className="h-3.5 w-3.5 text-zinc-700 shrink-0" />
               ) : (
                 <MapPin className="h-3.5 w-3.5 text-amber-500 shrink-0" />
               )}
-              <span className="max-w-[70px] sm:max-w-[100px] truncate">{weather?.location_name || "地域未設定"}</span>
+              <span className="max-w-[65px] sm:max-w-[90px] truncate">{weather?.location_name || "地域未設定"}</span>
               {weather && (
-                <span className="text-zinc-500 font-medium text-[11px] shrink-0">
+                <span className="font-mono text-zinc-500 font-bold text-[11px] shrink-0">
                   {weather.afternoon_temp_c}℃
                 </span>
               )}
             </button>
 
-            {/* Google カレンダー予定ボタン（チャットに予定カードを展開） */}
+            {/* 予定件数 */}
             <button
               onClick={handleOpenScheduleInChat}
-              className={`flex items-center gap-1.5 rounded-xl border px-2.5 py-1 text-xs font-semibold transition shadow-2xs ${
+              className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-semibold transition shadow-2xs ${
                 gcalStatus !== "disconnected"
-                  ? "border-zinc-300 bg-zinc-50 text-zinc-900 hover:bg-zinc-100"
-                  : "border-zinc-200 bg-white hover:bg-zinc-50 text-zinc-700 hover:border-zinc-300"
+                  ? "border-zinc-300 bg-zinc-50 text-zinc-900"
+                  : "border-zinc-200/80 bg-white hover:bg-zinc-50 text-zinc-700"
               }`}
-              title="チャットで予定一覧を開く"
+              title="予定一覧を展開"
             >
-              <Calendar className="h-3.5 w-3.5 text-zinc-600 shrink-0" />
-              <span>予定 {events.length}件</span>
+              <Calendar className="h-3.5 w-3.5 text-zinc-500 shrink-0" />
+              <span>{events.length}件</span>
               {gcalStatus !== "disconnected" && (
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
               )}
             </button>
-
-            {/* 手持ち服ボタン */}
-            <button
-              onClick={() => handleOpenWardrobeInChat()}
-              className="flex items-center gap-1 rounded-xl bg-zinc-100 hover:bg-zinc-200 px-2.5 py-1 text-xs font-bold text-zinc-800 transition cursor-pointer"
-              title="チャットで手持ち服一覧を開く"
-            >
-              <Shirt className="h-3.5 w-3.5 text-zinc-600" />
-              <span>服 ({wardrobe.length})</span>
-            </button>
           </div>
         </div>
 
-        {/* 1-Click 検証シナリオバー */}
-        {presets.length > 0 && (
-          <div className="border-t border-zinc-100 bg-zinc-50/70 px-3 py-1.5 sm:px-4">
-            <div className="mx-auto max-w-4xl flex items-center justify-between gap-2 text-xs">
-              <span className="font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded text-[10px] shrink-0">
-                1-Click デモ検証
-              </span>
-              <select
-                value={selectedPresetId}
-                onChange={(e) => handleSelectPreset(e.target.value)}
-                className="flex-1 max-w-md rounded-lg border border-zinc-300 bg-white px-2 py-0.8 text-xs font-medium text-zinc-800 focus:outline-none cursor-pointer truncate"
-              >
-                {presets.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+        {/* 統合インテリジェント・ステータスバー（1-Clickデモセレクター ＋ 物理Clo計器を1本に美しく集約） */}
+        <div className="border-t border-zinc-100 bg-zinc-50/70 px-3 py-1 sm:px-4">
+          <div className="mx-auto max-w-4xl flex items-center justify-between gap-2 overflow-x-auto scrollbar-none text-[11px]">
+            {/* 左側: 1-Click デモセレクター */}
+            {presets.length > 0 && (
+              <div className="flex items-center gap-1.5 shrink-0">
+                <span className="font-bold text-amber-900 bg-amber-100/80 px-1.5 py-0.5 rounded-md text-[9px]">
+                  デモ検証
+                </span>
+                <select
+                  value={selectedPresetId}
+                  onChange={(e) => handleSelectPreset(e.target.value)}
+                  className="rounded-md border border-zinc-200 bg-white/90 px-1.5 py-0.5 text-[11px] font-medium text-zinc-800 focus:outline-none cursor-pointer truncate max-w-[130px] sm:max-w-[200px]"
+                >
+                  {presets.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* 右側: リアルタイム数理物理計器 */}
+            {latestTrace && (
+              <div className="flex items-center gap-2 shrink-0 font-medium text-zinc-500">
+                <div className="flex items-center gap-1 bg-white/80 border border-zinc-200/60 rounded-md px-1.5 py-0.5 shadow-2xs">
+                  <span className="text-zinc-400 text-[10px]">目標Clo</span>
+                  <span className="font-mono font-bold text-zinc-900 text-[10px]">
+                    {latestTrace.target_clo_min}〜{latestTrace.target_clo_max}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-1 bg-white/80 border border-zinc-200/60 rounded-md px-1.5 py-0.5 shadow-2xs">
+                  <span className="text-zinc-400 text-[10px]">体感補正</span>
+                  <span className={`font-mono font-bold text-[10px] ${
+                    (profile.personal_clo_offset || 0) > 0
+                      ? "text-blue-600"
+                      : (profile.personal_clo_offset || 0) < 0
+                      ? "text-amber-600"
+                      : "text-zinc-700"
+                  }`}>
+                    {(profile.personal_clo_offset || 0) > 0 ? "+" : ""}
+                    {profile.personal_clo_offset || 0}
+                  </span>
+                </div>
+
+                {profile.preferred_styles?.includes("dormancy_revival") && (
+                  <span className="bg-amber-100 text-amber-900 font-bold px-1.5 py-0.5 rounded text-[9px]">
+                    死蔵優先中 🔥
+                  </span>
+                )}
+              </div>
+            )}
           </div>
-        )}
+        </div>
       </header>
 
       {/* エラーバナー */}
@@ -1451,6 +1659,7 @@ export default function ClosetMeChatApp() {
           onAddManualItem={handleManualAddClothing}
           onComfortFeedback={handleComfortFeedback}
           feedbackSubmittedRank={feedbackSubmittedRank}
+          gcalStatus={gcalStatus}
         />
         <div ref={chatBottomRef} />
       </main>
@@ -1463,6 +1672,7 @@ export default function ClosetMeChatApp() {
         onSelectChip={handleSelectChip}
         suggestedChips={suggestedChips}
         disabled={isLoading}
+        externalOpenRequest={composerOpenReq}
       />
 
       {/* 場所・気象設定モーダル */}

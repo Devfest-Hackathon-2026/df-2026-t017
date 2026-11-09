@@ -21,6 +21,8 @@ const CATEGORY_LABELS: Record<ClothingCategory, string> = {
   bottom: "ボトムス",
   outer: "アウター",
   shoes: "シューズ",
+  bag: "バッグ",
+  accessory: "小物",
 };
 
 const DEFAULT_CLO: Record<ClothingCategory, number> = {
@@ -28,6 +30,8 @@ const DEFAULT_CLO: Record<ClothingCategory, number> = {
   bottom: 0.24,
   outer: 0.50,
   shoes: 0.05,
+  bag: 0,
+  accessory: 0,
 };
 
 interface ClosetDrawerProps {
@@ -318,8 +322,8 @@ export function ClosetDrawer({
                   <label className="block text-[11px] font-semibold text-zinc-600 mb-1">
                     カテゴリ
                   </label>
-                  <div className="grid grid-cols-4 gap-1.5">
-                    {(["top", "bottom", "outer", "shoes"] as const).map((cat) => (
+                  <div className="grid grid-cols-3 gap-1.5">
+                    {(["top", "bottom", "outer", "shoes", "bag", "accessory"] as const).map((cat) => (
                       <button
                         type="button"
                         key={cat}

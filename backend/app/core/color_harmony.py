@@ -10,6 +10,34 @@ from typing import Sequence
 from app.models.schemas import ClothingItem
 
 
+PERSONAL_COLOR_PALETTES = {
+    "spring": ["アイボリー", "ベージュ", "キャメル", "コーラル", "オレンジ", "イエロー", "ライトグリーン"],
+    "summer": ["オフホワイト", "グレー", "グレージュ", "サックスブルー", "ブルー", "ネイビー", "ピンク", "ラベンダー"],
+    "autumn": ["ベージュ", "ブラウン", "キャメル", "カーキ", "オリーブ", "ボルドー", "マスタード"],
+    "winter": ["ブラック", "ホワイト", "ネイビー", "チャコール", "ブルー", "レッド", "ボルドー"],
+}
+
+PERSONAL_COLOR_LABELS = {
+    "spring": "イエベ春",
+    "summer": "ブルベ夏",
+    "autumn": "イエベ秋",
+    "winter": "ブルベ冬",
+}
+
+
+def calculate_personal_color_fit(items: Sequence[ClothingItem], personal_color: str) -> float:
+    palette = PERSONAL_COLOR_PALETTES.get(personal_color)
+    if not palette:
+        return 0.75
+
+    colors = [color for item in items for color in item.colors[:1]]
+    if not colors:
+        return 0.75
+
+    matched = sum(any(preferred in color for preferred in palette) for color in colors)
+    return round(0.45 + 0.55 * matched / len(colors), 3)
+
+
 # 色彩分類マップ
 COLOR_FAMILIES = {
     "monotone": {"ブラック", "ホワイト", "グレー", "チャコール", "オフホワイト", "black", "white", "gray", "charcoal"},

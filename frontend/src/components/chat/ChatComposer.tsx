@@ -182,7 +182,7 @@ export function ChatComposer({
   const canSend = inputText.trim().length > 0 && !disabled;
 
   return (
-    <div className="fixed bottom-0 left-0 right-0 z-20 pointer-events-none pb-2.5 pt-5 sm:pb-4 sm:pt-6 bg-gradient-to-t from-[#FAF9F6] via-[#FAF9F6]/95 to-transparent">
+    <div className="fixed bottom-0 left-0 right-0 z-20 pointer-events-none pb-2.5 pt-5 sm:pb-4 sm:pt-6 bg-gradient-to-t from-[#fff8fa] via-[#fff8fa]/95 to-transparent">
       {/* チャット表示エリア（max-w-3xl）と横幅を完全に揃える */}
       <div className="mx-auto max-w-3xl px-3 sm:px-4 pointer-events-auto flex flex-col items-center space-y-2 w-full">
         <input
@@ -208,10 +208,10 @@ export function ChatComposer({
                 disabled={disabled}
                 className={`shrink-0 rounded-full px-3.5 py-1.5 text-xs font-semibold transition-all duration-150 active:scale-95 disabled:opacity-40 cursor-pointer flex items-center gap-1.5 shadow-2xs ${
                   isFirstPrimary
-                    ? "bg-zinc-900 text-white hover:bg-zinc-800 shadow-zinc-900/10"
+                    ? "bg-gradient-to-br from-[#d08aa5] to-[#ad6983] text-white shadow-[#ad6983]/15"
                     : variant === "amber"
                     ? "border border-amber-200/90 bg-amber-50/95 backdrop-blur-md text-amber-900 hover:bg-amber-100/80"
-                    : "border border-zinc-200/90 bg-white/95 backdrop-blur-md text-zinc-700 hover:bg-zinc-100 hover:text-zinc-900 hover:border-zinc-300"
+                    : "border border-[#e6cbd5] bg-white/95 backdrop-blur-md text-[#835c6b] hover:bg-[#f7e3eb] hover:border-[#c9869f]"
                 }`}
               >
                 <Icon
@@ -320,7 +320,7 @@ export function ChatComposer({
               disabled={!canSend}
               className={`h-7 w-7 sm:h-8 sm:w-8 rounded-full flex items-center justify-center transition-all duration-200 shrink-0 ${
                 canSend
-                  ? "bg-zinc-900 text-white hover:bg-zinc-800 active:scale-95 shadow-xs cursor-pointer"
+                  ? "bg-gradient-to-br from-[#d08aa5] to-[#ad6983] text-white hover:brightness-95 active:scale-95 shadow-md cursor-pointer"
                   : "bg-zinc-100 text-zinc-300 cursor-not-allowed"
               }`}
             >

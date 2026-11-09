@@ -3,7 +3,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from app.core.auth import AuthContext, get_auth_context
-from app.core.color_harmony import calculate_color_harmony
+from app.core.color_harmony import PERSONAL_COLOR_LABELS, calculate_color_harmony, calculate_personal_color_fit
 from app.core.logging import log_structured
 from app.core.physics import (
     calculate_target_clo_range,
@@ -197,11 +197,12 @@ async def submit_comfort_feedback(
     着用後の1タップ体感フィードバック（cold / optimal / warm）を記録し、
     Cloud Firestore（またはローカル永続層）に個人断熱補正値 (personal_clo_offset) を自己学習保存する。
     """
-    res = record_comfort_feedback(uid=auth.uid, req=payload)
+    scoped_uid = f"{auth.uid}:{payload.profile_id}"
+    res = record_comfort_feedback(uid=scoped_uid, req=payload)
     log_structured(
         "INFO",
         "Processed comfort feedback",
-        uid=auth.uid,
+        uid=scoped_uid,
         feedback=payload.feedback,
         updated_offset=res.updated_offset,
         feedback_count=res.feedback_count,
@@ -217,7 +218,7 @@ async def record_outfit_wear(
 ) -> WearOutfitResponse:
     """ユーザーが「今日これを着る」を確定した際、Firestoreの着用履歴に記録する。"""
     source = record_worn_outfit_to_firestore(
-        uid=auth.uid,
+        uid=f"{auth.uid}:{payload.profile_id}",
         item_ids=payload.item_ids,
         total_clo=payload.total_clo,
         location=payload.weather_location,
@@ -247,7 +248,9 @@ async def recommend_outfits(
         payload.events = enrich_events_with_weather(payload.events, payload.weather)
 
     # 2. Firestore（またはローカル永続層）から学習済み個人体感オフセットをロードして反映
-    calibrated_offset, feedback_count, storage_src = get_user_calibration(auth.uid)
+    calibrated_offset, feedback_count, storage_src = get_user_calibration(
+        f"{auth.uid}:{payload.profile_id}"
+    )
     if payload.profile.personal_clo_offset == 0.0 and calibrated_offset != 0.0:
         payload.profile.personal_clo_offset = calibrated_offset
         payload.profile.feedback_count = feedback_count
@@ -282,15 +285,44 @@ async def recommend_outfits(
     recent_set = set(payload.recent_worn_ids)
     scored_candidates: list[dict] = []
     for cand in physical_candidates:
+        candidate_items = list(cand.items)
+        base_tags = {tag for item in cand.items for tag in item.style_tags}
+        base_colors = {color for item in cand.items for color in item.colors}
+        for optional_category in ("bag", "accessory"):
+            optional_items = [
+                item
+                for item in payload.wardrobe
+                if item.category == optional_category
+                and item.availability == "available"
+                and item.id not in payload.profile.banned_item_ids
+            ]
+            if optional_items:
+                best_item = max(
+                    optional_items,
+                    key=lambda item: (
+                        2 * len(base_tags.intersection(item.style_tags))
+                        + len(base_colors.intersection(item.colors))
+                        + min(item.days_since_last_worn, 30) / 30
+                    ),
+                )
+                candidate_items.append(best_item)
+
         vec_sim, dormancy_score, revived_ids = compute_vector_and_dormancy_scores(
-            items=cand.items,
+            items=candidate_items,
             preferred_styles=payload.profile.preferred_styles,
             recent_worn_ids=recent_set,
         )
-        harmony = calculate_color_harmony(cand.items)
-        aesthetic_score = round(0.6 * harmony.color_harmony_score + 0.4 * harmony.formality_harmony_score, 3)
+        harmony = calculate_color_harmony(candidate_items)
+        personal_color_fit = calculate_personal_color_fit(candidate_items, payload.profile.personal_color)
+        aesthetic_score = round(
+            0.45 * harmony.color_harmony_score
+            + 0.25 * harmony.formality_harmony_score
+            + 0.30 * personal_color_fit,
+            3,
+        )
+        personal_color_label = PERSONAL_COLOR_LABELS.get(payload.profile.personal_color)
 
-        avg_formality = sum(i.formality for i in cand.items) / len(cand.items)
+        avg_formality = sum(i.formality for i in candidate_items) / len(candidate_items)
         formality_diff = abs(avg_formality - required_formality)
         tpo_fit = round(max(0.2, 1.0 - formality_diff * 0.28), 3)
 
@@ -304,10 +336,14 @@ async def recommend_outfits(
         )
         scored_candidates.append(
             {
-                "items": cand.items,
+                "items": candidate_items,
                 "total_clo": cand.total_clo,
                 "revived_ids": revived_ids,
-                "palette_name": harmony.palette_name,
+                "palette_name": (
+                    f"{personal_color_label}になじむ{harmony.palette_name}"
+                    if personal_color_label and personal_color_fit >= 0.7
+                    else harmony.palette_name
+                ),
                 "color_summary": harmony.color_summary,
                 "breakdown": ScoreBreakdown(
                     physics_clo_fit=cand.physics_clo_fit,

@@ -36,6 +36,8 @@ CLOTHING_KNOWLEDGE_BASE = [
     {"patterns": ["ローファー", "革靴", "レザーシューズ", "loafer"], "category": "shoes", "subtype": "loafer", "clo": 0.05, "formality": 4, "tags": ["clean", "office"]},
     {"patterns": ["ブーツ", "サイドゴア", "boots"], "category": "shoes", "subtype": "boots", "clo": 0.06, "formality": 4, "tags": ["clean", "winter"]},
     {"patterns": ["スニーカー", "sneaker", "靴", "シューズ"], "category": "shoes", "subtype": "sneaker", "clo": 0.04, "formality": 2, "tags": ["casual", "minimal"]},
+    {"patterns": ["バッグ", "かばん", "鞄", "bag"], "category": "bag", "subtype": "handbag", "clo": 0.0, "formality": 3, "tags": ["accessory"]},
+    {"patterns": ["カチューシャ", "ヘアバンド", "小物", "accessory"], "category": "accessory", "subtype": "headband", "clo": 0.0, "formality": 3, "tags": ["accessory", "feminine"]},
 ]
 
 COLOR_KEYWORDS = {

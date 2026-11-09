@@ -136,7 +136,7 @@ def analyze_clothing_image(
             prompt = (
                 "あなたは被服気候学とファッションに精通したAIスタイリストです。"
                 "添付された衣服の画像から以下のJSONスキーマに従いメタデータを抽出してください。\n"
-                "- category は top / bottom / outer / shoes のいずれか\n"
+                "- category は top / bottom / outer / shoes / bag / accessory のいずれか\n"
                 "- formality は 1(部屋着/スポーティ)〜5(ビジネスフォーマル)\n"
                 "- clo_value は単体断熱性指標 (Tシャツ:0.09, 長袖シャツ:0.25, ニット:0.36, スラックス:0.24, コート:0.55, 靴:0.04 等)"
             )
@@ -153,7 +153,7 @@ def analyze_clothing_image(
                 ),
             )
             parsed = _GeminiClothingTagSchema.model_validate_json(response.text)
-            cat = parsed.category if parsed.category in {"top", "bottom", "outer", "shoes"} else "top"
+            cat = parsed.category if parsed.category in {"top", "bottom", "outer", "shoes", "bag", "accessory"} else "top"
             return AnalyzeClothingResponse(
                 suggested_name=parsed.suggested_name,
                 category=cat,  # type: ignore[arg-type]

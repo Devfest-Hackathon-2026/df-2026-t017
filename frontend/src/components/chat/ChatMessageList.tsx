@@ -48,6 +48,8 @@ const CATEGORY_LABELS: Record<ClothingCategory, string> = {
   bottom: "ボトムス",
   outer: "アウター",
   shoes: "シューズ",
+  bag: "バッグ",
+  accessory: "小物",
 };
 
 interface ChatMessageListProps {
@@ -144,7 +146,7 @@ export function ChatMessageList({
   };
 
   return (
-    <div className="flex-1 space-y-4 px-3 py-3 sm:px-4 sm:py-5 pb-32 sm:pb-36 max-w-3xl mx-auto w-full">
+    <div className="mx-auto w-full max-w-3xl flex-1 space-y-5 px-3 py-4 pb-32 sm:px-4 sm:py-6 sm:pb-36">
       {messages.map((msg) => {
         const isUser = msg.sender === "user";
 
@@ -156,7 +158,7 @@ export function ChatMessageList({
             {/* 送信者ラベル（ミニマルなタイポグラフィ） */}
             <div className="flex items-center gap-1.5 text-[11px] text-zinc-400 px-1">
               {!isUser && (
-                <div className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-zinc-900 text-white text-[8px] font-bold">
+                <div className="flex h-4 w-4 items-center justify-center rounded-full bg-[#c9869f] text-[8px] font-bold text-white shadow-sm">
                   C
                 </div>
               )}
@@ -170,8 +172,8 @@ export function ChatMessageList({
               <div
                 className={`rounded-2xl px-3.5 py-2 text-xs sm:text-sm leading-relaxed max-w-[88%] sm:max-w-[80%] ${
                   isUser
-                    ? "bg-zinc-900 text-white rounded-tr-xs"
-                    : "bg-white border border-zinc-200/70 text-zinc-800 rounded-tl-xs shadow-2xs"
+                    ? "bg-gradient-to-br from-[#c9869f] to-[#ad6a84] text-white rounded-tr-xs shadow-md shadow-[#b8738e]/15"
+                    : "chouchou-card bg-white/95 border text-[#57434b] rounded-tl-xs"
                 }`}
               >
                 {msg.imageUrl && (
@@ -1244,6 +1246,16 @@ const SUBTYPE_PRESETS: Record<ClothingCategory, Array<{ label: string; subtype: 
     { label: "スニーカー", subtype: "sneaker", clo: 0.04, formality: 2 },
     { label: "ブーツ", subtype: "boots", clo: 0.06, formality: 4 },
   ],
+  bag: [
+    { label: "ハンドバッグ", subtype: "handbag", clo: 0, formality: 3 },
+    { label: "ショルダー", subtype: "shoulder-bag", clo: 0, formality: 3 },
+    { label: "かごバッグ", subtype: "basket-bag", clo: 0, formality: 2 },
+  ],
+  accessory: [
+    { label: "カチューシャ", subtype: "headband", clo: 0, formality: 3 },
+    { label: "帽子", subtype: "hat", clo: 0.02, formality: 2 },
+    { label: "アクセサリー", subtype: "jewelry", clo: 0, formality: 4 },
+  ],
 };
 
 /**
@@ -1342,6 +1354,8 @@ function DraftClothingCard({
                 <option value="bottom">ボトムス</option>
                 <option value="outer">アウター</option>
                 <option value="shoes">シューズ</option>
+                <option value="bag">バッグ</option>
+                <option value="accessory">小物</option>
               </select>
             </div>
           </div>
@@ -1418,6 +1432,8 @@ const WARDROBE_DEFAULT_CLO: Record<ClothingCategory, number> = {
   bottom: 0.24,
   outer: 0.50,
   shoes: 0.05,
+  bag: 0,
+  accessory: 0,
 };
 
 interface WardrobeCardProps {
@@ -1575,7 +1591,7 @@ function WardrobeCard({
           <div>
             <label className="block text-[10px] font-semibold text-zinc-600 mb-0.5">カテゴリ</label>
             <div className="grid grid-cols-4 gap-1">
-              {(["top", "bottom", "outer", "shoes"] as const).map((cat) => (
+              {(["top", "bottom", "outer", "shoes", "bag", "accessory"] as const).map((cat) => (
                 <button
                   type="button"
                   key={cat}

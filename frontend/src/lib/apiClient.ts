@@ -32,6 +32,7 @@ export async function fetchDemoContext(): Promise<{
 }
 
 export async function requestRecommendations(params: {
+  profile_id?: string;
   weather: WeatherSnapshot;
   events: RawCalendarEvent[];
   profile: UserProfile;
@@ -186,6 +187,7 @@ export async function submitComfortFeedback(
 }
 
 export async function recordOutfitWear(params: {
+  profile_id?: string;
   item_ids: string[];
   total_clo: number;
   weather_location?: string;

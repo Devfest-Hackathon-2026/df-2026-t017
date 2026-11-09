@@ -1,4 +1,4 @@
-export type ClothingCategory = "top" | "bottom" | "outer" | "shoes";
+export type ClothingCategory = "top" | "bottom" | "outer" | "shoes" | "bag" | "accessory";
 export type AvailabilityStatus = "available" | "laundry";
 
 export interface ClothingItem {
@@ -54,8 +54,21 @@ export interface UserProfile {
   personal_clo_offset?: number;
   feedback_count?: number;
   preferred_styles: string[];
+  personal_color?: PersonalColor;
   banned_item_ids: string[];
   home_location?: string | null;
+}
+
+export type GenderIdentity = "male" | "female" | "unspecified";
+export type PersonalColor = "spring" | "summer" | "autumn" | "winter" | "unknown";
+export type AgeGroup = "teens" | "20s" | "30s" | "40s" | "50s" | "60s_plus" | "unspecified";
+
+export interface ClosetProfile extends UserProfile {
+  id: string;
+  name: string;
+  gender: GenderIdentity;
+  personal_color: PersonalColor;
+  age_group: AgeGroup;
 }
 
 export interface ScoreBreakdown {
@@ -97,6 +110,7 @@ export interface PipelineTrace {
 
 export interface ComfortFeedbackRequest {
   feedback: "cold" | "optimal" | "warm";
+  profile_id?: string;
   worn_item_ids: string[];
   actual_total_clo: number;
   weather_temp_c?: number | null;
@@ -279,4 +293,3 @@ export interface ChatMessage {
   attachment?: ChatAttachment;
   suggestedChips?: string[];
 }
-

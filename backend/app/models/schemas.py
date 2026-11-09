@@ -2,7 +2,7 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field
 
 
-ClothingCategory = Literal["top", "bottom", "outer", "shoes"]
+ClothingCategory = Literal["top", "bottom", "outer", "shoes", "bag", "accessory"]
 AvailabilityStatus = Literal["available", "laundry"]
 
 
@@ -13,7 +13,7 @@ class ClothingItem(BaseModel):
     subtype: str = ""
     colors: list[str] = Field(default_factory=list)
     formality: int = Field(ge=1, le=5, description="1:部屋着/スポーティ 〜 5:ビジネスフォーマル")
-    clo_value: float = Field(ge=0.02, le=1.5, description="被服気候学に基づく断熱性指標 (Clo)")
+    clo_value: float = Field(ge=0.0, le=1.5, description="被服気候学に基づく断熱性指標 (Clo)")
     water_resistant: bool = False
     wear_count: int = Field(default=0, ge=0)
     days_since_last_worn: int = Field(default=14, ge=0, description="最終着用からの経過日数（死蔵度判定）")
@@ -67,11 +67,13 @@ class UserProfile(BaseModel):
     )
     feedback_count: int = Field(default=0, ge=0, description="これまでに蓄積された体感フィードバック回数")
     preferred_styles: list[str] = Field(default_factory=lambda: ["clean", "minimal"])
+    personal_color: Literal["spring", "summer", "autumn", "winter", "unknown"] = "unknown"
     banned_item_ids: list[str] = Field(default_factory=list)
     home_location: str | None = Field(default=None, description="デフォルトの居住区（自宅エリア）")
 
 
 class RecommendRequest(BaseModel):
+    profile_id: str = Field(default="default", min_length=1, max_length=80)
     weather: WeatherSnapshot
     events: list[RawCalendarEvent]
     profile: UserProfile = Field(default_factory=UserProfile)
@@ -224,6 +226,7 @@ class ChatIntentResponse(BaseModel):
 
 class ComfortFeedbackRequest(BaseModel):
     feedback: Literal["cold", "optimal", "warm"]  # cold(+0.08 Clo) / optimal(0) / warm(-0.08 Clo)
+    profile_id: str = Field(default="default", min_length=1, max_length=80)
     worn_item_ids: list[str] = Field(default_factory=list)
     actual_total_clo: float = Field(default=0.9)
     weather_temp_c: float | None = None
@@ -238,6 +241,7 @@ class ComfortFeedbackResponse(BaseModel):
 
 class WearOutfitRequest(BaseModel):
     outfit_rank: int = 1
+    profile_id: str = Field(default="default", min_length=1, max_length=80)
     item_ids: list[str]
     total_clo: float
     weather_location: str = "東京・渋谷"
@@ -247,5 +251,3 @@ class WearOutfitResponse(BaseModel):
     status: str = "ok"
     wear_count_updated: int
     saved_to: str
-
-

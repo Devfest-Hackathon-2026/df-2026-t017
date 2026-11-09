@@ -25,7 +25,10 @@ class Settings(BaseModel):
     enable_firestore: bool = os.getenv("ENABLE_FIRESTORE", "false").lower() == "true"
     gemini_model_name: str = os.getenv("GEMINI_MODEL_NAME", "gemini-2.5-flash")
     google_maps_api_key: str = os.getenv("GOOGLE_MAPS_API_KEY", "")
-    allowed_origins: str = os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")
+    allowed_origins: str = os.getenv(
+        "ALLOWED_ORIGINS",
+        "http://localhost:3000,http://127.0.0.1:3000",
+    )
 
     @property
     def cors_origins(self) -> list[str]:

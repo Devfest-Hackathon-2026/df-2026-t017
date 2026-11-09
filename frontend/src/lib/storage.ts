@@ -27,32 +27,40 @@ function openDB(): Promise<IDBDatabase> {
 /**
  * 保存されたクローゼットデータを取得
  */
-export async function loadSavedWardrobe(): Promise<ClothingItem[] | null> {
+function wardrobeKey(profileId: string): string {
+  return profileId === "default" ? WARDROBE_KEY : `${WARDROBE_KEY}:${profileId}`;
+}
+
+function localWardrobeKey(profileId: string): string {
+  return profileId === "default" ? LOCAL_STORAGE_KEY : `${LOCAL_STORAGE_KEY}:${profileId}`;
+}
+
+export async function loadSavedWardrobe(profileId = "default"): Promise<ClothingItem[] | null> {
   try {
     const db = await openDB();
     return new Promise((resolve) => {
       const tx = db.transaction(STORE_NAME, "readonly");
       const store = tx.objectStore(STORE_NAME);
-      const req = store.get(WARDROBE_KEY);
+      const req = store.get(wardrobeKey(profileId));
       req.onsuccess = () => {
         if (req.result && Array.isArray(req.result) && req.result.length > 0) {
           resolve(req.result);
         } else {
           // localStorage フォールバック
-          resolve(loadFromLocalStorage());
+          resolve(loadFromLocalStorage(profileId));
         }
       };
-      req.onerror = () => resolve(loadFromLocalStorage());
+      req.onerror = () => resolve(loadFromLocalStorage(profileId));
     });
   } catch {
-    return loadFromLocalStorage();
+    return loadFromLocalStorage(profileId);
   }
 }
 
-function loadFromLocalStorage(): ClothingItem[] | null {
+function loadFromLocalStorage(profileId: string): ClothingItem[] | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = localStorage.getItem(LOCAL_STORAGE_KEY);
+    const raw = localStorage.getItem(localWardrobeKey(profileId));
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     return Array.isArray(parsed) && parsed.length > 0 ? parsed : null;
@@ -64,13 +72,13 @@ function loadFromLocalStorage(): ClothingItem[] | null {
 /**
  * クローゼットデータを保存
  */
-export async function saveWardrobe(wardrobe: ClothingItem[]): Promise<void> {
+export async function saveWardrobe(wardrobe: ClothingItem[], profileId = "default"): Promise<void> {
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
-      const req = store.put(wardrobe, WARDROBE_KEY);
+      const req = store.put(wardrobe, wardrobeKey(profileId));
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
@@ -78,7 +86,7 @@ export async function saveWardrobe(wardrobe: ClothingItem[]): Promise<void> {
     // IndexedDB失敗時はlocalStorageにフォールバック（画像サイズ等で上限がある場合は一部削るなどの配慮）
     try {
       if (typeof window !== "undefined") {
-        localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(wardrobe));
+        localStorage.setItem(localWardrobeKey(profileId), JSON.stringify(wardrobe));
       }
     } catch (e) {
       console.warn("Storage quota exceeded or unavailable:", e);
@@ -89,13 +97,13 @@ export async function saveWardrobe(wardrobe: ClothingItem[]): Promise<void> {
 /**
  * 保存データをリセット（デモデータ復帰用）
  */
-export async function clearSavedWardrobe(): Promise<void> {
+export async function clearSavedWardrobe(profileId = "default"): Promise<void> {
   try {
     const db = await openDB();
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction(STORE_NAME, "readwrite");
       const store = tx.objectStore(STORE_NAME);
-      const req = store.delete(WARDROBE_KEY);
+      const req = store.delete(wardrobeKey(profileId));
       req.onsuccess = () => resolve();
       req.onerror = () => reject(req.error);
     });
@@ -103,6 +111,6 @@ export async function clearSavedWardrobe(): Promise<void> {
     // ignore
   }
   if (typeof window !== "undefined") {
-    localStorage.removeItem(LOCAL_STORAGE_KEY);
+    localStorage.removeItem(localWardrobeKey(profileId));
   }
 }

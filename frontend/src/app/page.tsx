@@ -12,6 +12,7 @@ import {
   RefreshCw,
   Shirt,
   Trash2,
+  UserRound,
   X,
 } from "lucide-react";
 import {
@@ -33,10 +34,18 @@ import {
   saveWardrobe,
 } from "@/lib/storage";
 import {
+  DEFAULT_PROFILE,
+  loadActiveProfileId,
+  loadProfiles,
+  saveActiveProfileId,
+  saveProfiles,
+} from "@/lib/profileStorage";
+import {
   AnalyzeClothingResponse,
   ChatMessage,
   ClothingCategory,
   ClothingItem,
+  ClosetProfile,
   CrossModalSearchResult,
   DemoPreset,
   OutfitProposal,
@@ -57,12 +66,15 @@ import { ChatMessageList } from "@/components/chat/ChatMessageList";
 import { ChatComposer, ComposerFocusContext } from "@/components/chat/ChatComposer";
 import { LocationWeatherModal } from "@/components/drawers/LocationWeatherModal";
 import { CalendarDrawer } from "@/components/drawers/CalendarDrawer";
+import { ProfileModal } from "@/components/drawers/ProfileModal";
 
 const CATEGORY_LABELS: Record<ClothingCategory, string> = {
   top: "トップス",
   bottom: "ボトムス",
   outer: "アウター",
   shoes: "シューズ",
+  bag: "バッグ",
+  accessory: "小物",
 };
 
 export default function ClosetMeChatApp() {
@@ -70,6 +82,8 @@ export default function ClosetMeChatApp() {
   const [wardrobe, setWardrobe] = useState<ClothingItem[]>([]);
   const [presets, setPresets] = useState<DemoPreset[]>([]);
   const [selectedPresetId, setSelectedPresetId] = useState<string>("");
+  const [profiles, setProfiles] = useState<ClosetProfile[]>([DEFAULT_PROFILE]);
+  const [activeProfileId, setActiveProfileId] = useState(DEFAULT_PROFILE.id);
 
   const [weather, setWeather] = useState<WeatherSnapshot | null>(null);
   const [events, setEvents] = useState<RawCalendarEvent[]>([]);
@@ -101,6 +115,7 @@ export default function ClosetMeChatApp() {
   // ドロワー・モーダル開閉状態
   const [isLocationModalOpen, setIsLocationModalOpen] = useState(false);
   const [isCalendarDrawerOpen, setIsCalendarDrawerOpen] = useState(false);
+  const [isProfileModalOpen, setIsProfileModalOpen] = useState(false);
   const [isLoadingWeather, setIsLoadingWeather] = useState(false);
   const [selectedItemDetail, setSelectedItemDetail] = useState<ClothingItem | null>(null);
 
@@ -122,6 +137,30 @@ export default function ClosetMeChatApp() {
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const chatBottomRef = useRef<HTMLDivElement>(null);
+  const activeClosetProfile = profiles.find((item) => item.id === activeProfileId) || profiles[0];
+
+  const demoWardrobeForProfile = (items: ClothingItem[], target: ClosetProfile) => {
+    if (target.gender === "female") return items.filter((item) => item.style_tags.includes("grl"));
+    if (target.gender === "male") return items.filter((item) => !item.style_tags.includes("grl"));
+    return items;
+  };
+
+  const refreshDemoProductImages = (items: ClothingItem[], demoItems: ClothingItem[]) => {
+    const demoById = new Map(demoItems.map((item) => [item.id, item]));
+    const refreshedItems = items.map((item) => {
+      const currentDemoItem = item.style_tags.includes("grl") ? demoById.get(item.id) : undefined;
+      return currentDemoItem
+        ? { ...item, image_url: currentDemoItem.image_url, colors: currentDemoItem.colors }
+        : item;
+    });
+    if (!items.some((item) => item.style_tags.includes("grl"))) return refreshedItems;
+
+    const savedIds = new Set(refreshedItems.map((item) => item.id));
+    const missingFemaleDemoItems = demoItems.filter(
+      (item) => item.style_tags.includes("grl") && !savedIds.has(item.id),
+    );
+    return [...refreshedItems, ...missingFemaleDemoItems];
+  };
 
   const scrollToBottom = () => {
     setTimeout(() => {
@@ -132,6 +171,14 @@ export default function ClosetMeChatApp() {
   const getNowTime = () => {
     const d = new Date();
     return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+
+  const applyProfileUpdate = (nextProfile: UserProfile) => {
+    const updatedProfile: ClosetProfile = { ...activeClosetProfile, ...nextProfile };
+    const updatedProfiles = profiles.map((item) => item.id === activeProfileId ? updatedProfile : item);
+    setProfile(updatedProfile);
+    setProfiles(updatedProfiles);
+    saveProfiles(updatedProfiles);
   };
 
   // メインの被服気候学 3段階推薦パイプライン実行
@@ -149,6 +196,7 @@ export default function ClosetMeChatApp() {
       try {
         const destLoc = ev.find((e) => e.location && e.location.trim().length > 0)?.location?.trim() || null;
         const res = await requestRecommendations({
+          profile_id: activeProfileId,
           weather: w,
           events: ev,
           profile: prof,
@@ -169,6 +217,8 @@ export default function ClosetMeChatApp() {
           umbrellaSentence = `急な雨や夕方に備えて、折りたたみ傘があると安心です。`;
         }
 
+        const proposalCount = res.outfits.length;
+        const countLabel = `${proposalCount}案`;
         const rainPct = Math.round(w.rain_probability * 100);
         const rainPhrase = w.rain_probability >= 0.2 ? `降水確率 ${rainPct}%` : `雨の心配はほぼなし(${rainPct}%)`;
         const destSentence = destLoc ? `（移動先: ${destLoc}）` : "";
@@ -177,13 +227,17 @@ export default function ClosetMeChatApp() {
         let intro = "";
         if (customIntroText) {
           if (customIntroText.includes(w.location_name) && customIntroText.includes("℃") && customIntroText.includes("予報")) {
-            intro = customIntroText;
+          intro = customIntroText
+            .replace(/3案/g, countLabel)
+            .replace(/3つのコーディネート/g, `${proposalCount}つのコーディネート`);
           } else {
-            intro = `${weatherHeadline}\n\n${customIntroText}`;
+          intro = `${weatherHeadline}\n\n${customIntroText
+            .replace(/3案/g, countLabel)
+            .replace(/3つのコーディネート/g, `${proposalCount}つのコーディネート`)}`;
           }
         } else {
           const scheduleSummary = ev.length > 0 ? `本日の予定（${ev.map((e) => e.title).slice(0, 2).join("・")}）と` : "";
-          intro = `おはようございます！${weatherHeadline}\n${scheduleSummary}時間帯ごとの寒暖差に合わせて、手持ちの服から最適な3つのコーディネートを提案します。`;
+          intro = `おはようございます！${weatherHeadline}\n${scheduleSummary}時間帯ごとの寒暖差に合わせて、手持ちの服から最適な${proposalCount}つのコーディネートを提案します。`;
         }
 
         if (umbrellaSentence && !intro.includes(umbrellaSentence)) {
@@ -222,7 +276,7 @@ export default function ClosetMeChatApp() {
         setIsLoading(false);
       }
     },
-    []
+    [activeProfileId]
   );
 
   // 初回起動時のデータ取得 & 自動ウェルカム提案
@@ -243,13 +297,22 @@ export default function ClosetMeChatApp() {
           }
         }
 
+        const storedProfiles = loadProfiles();
+        const storedActiveId = loadActiveProfileId();
+        const activeStoredProfile = storedProfiles.find((item) => item.id === storedActiveId) || storedProfiles[0];
+        setProfiles(storedProfiles);
+        setActiveProfileId(activeStoredProfile.id);
+
         const ctx = await fetchDemoContext();
         setPresets(ctx.presets);
 
         // 保存されたクローゼットを優先復元（リロードしても自分の服が維持される）
-        const savedWardrobe = await loadSavedWardrobe();
-        const initialWardrobe = savedWardrobe && savedWardrobe.length > 0 ? savedWardrobe : ctx.wardrobe;
+        const savedWardrobe = await loadSavedWardrobe(activeStoredProfile.id);
+        const initialWardrobe = savedWardrobe && savedWardrobe.length > 0
+          ? refreshDemoProductImages(savedWardrobe, ctx.wardrobe)
+          : demoWardrobeForProfile(ctx.wardrobe, activeStoredProfile);
         setWardrobe(initialWardrobe);
+        setProfile(activeStoredProfile);
 
         if (ctx.presets.length > 0) {
           const first = ctx.presets[0];
@@ -269,7 +332,6 @@ export default function ClosetMeChatApp() {
 
           setWeather(initWeather);
           setEvents(initEvents);
-          setProfile(first.profile);
 
           // 1. 朝のブリーフィングカードを投稿
           const briefingMsg: ChatMessage = {
@@ -289,7 +351,7 @@ export default function ClosetMeChatApp() {
           await executeRecommendation(
             initWeather,
             initEvents,
-            first.profile,
+            activeStoredProfile,
             initialWardrobe,
             [],
             `本日の予定（${initEvents.map((e) => e.title).join("・")}）に合わせた、快適性と眠っている服の活用を両立する3案です！`
@@ -310,7 +372,6 @@ export default function ClosetMeChatApp() {
     setSelectedPresetId(found.id);
     setWeather(found.weather);
     setEvents(found.events);
-    setProfile(found.profile);
     setGcalStatus("disconnected");
 
     const userSwitchMsg: ChatMessage = {
@@ -324,7 +385,7 @@ export default function ClosetMeChatApp() {
     await executeRecommendation(
       found.weather,
       found.events,
-      found.profile,
+      profile,
       wardrobe,
       recentWornIds,
       `シナリオを「${found.label}」に切り替えました。寒暖差や活動量（METs）に合わせてClo値とフォーマル度を即座に再計算しました。`
@@ -703,7 +764,7 @@ export default function ClosetMeChatApp() {
       } else if (intentRes.intent === "update_sensitivity" && intentRes.cold_sensitivity !== undefined && intentRes.cold_sensitivity !== null) {
         // 寒がり/暑がり変更
         const nextProf = { ...profile, cold_sensitivity: intentRes.cold_sensitivity };
-        setProfile(nextProf);
+        applyProfileUpdate(nextProf);
         if (weather) {
           await executeRecommendation(
             weather,
@@ -740,7 +801,7 @@ export default function ClosetMeChatApp() {
         const nextProf = intentRes.preferred_styles
           ? { ...profile, preferred_styles: intentRes.preferred_styles }
           : profile;
-        setProfile(nextProf);
+        applyProfileUpdate(nextProf);
         if (weather) {
           await executeRecommendation(
             weather,
@@ -1029,7 +1090,7 @@ export default function ClosetMeChatApp() {
 
     const updated = [newItem, ...wardrobe];
     setWardrobe(updated);
-    await saveWardrobe(updated);
+    await saveWardrobe(updated, activeProfileId);
 
     const time = getNowTime();
     const confirmedMsg: ChatMessage = {
@@ -1163,12 +1224,13 @@ export default function ClosetMeChatApp() {
         : item
     );
     setWardrobe(updatedWardrobe);
-    await saveWardrobe(updatedWardrobe);
+    await saveWardrobe(updatedWardrobe, activeProfileId);
     setRecentWornIds(proposal.item_ids);
 
     // バックエンド（Firestore / 永続層）に着用履歴を保存
     try {
       await recordOutfitWear({
+        profile_id: activeProfileId,
         item_ids: proposal.item_ids,
         total_clo: proposal.total_clo,
         weather_location: weather?.location_name,
@@ -1294,6 +1356,7 @@ export default function ClosetMeChatApp() {
 
       const res = await submitComfortFeedback({
         feedback,
+        profile_id: activeProfileId,
         worn_item_ids: proposal.item_ids,
         actual_total_clo: proposal.total_clo,
         weather_temp_c: weather?.afternoon_temp_c,
@@ -1304,7 +1367,7 @@ export default function ClosetMeChatApp() {
         personal_clo_offset: res.updated_offset,
         feedback_count: res.feedback_count,
       };
-      setProfile(nextProf);
+      applyProfileUpdate(nextProf);
 
       const offsetDisplay = `${res.updated_offset > 0 ? "+" : ""}${res.updated_offset}`;
 
@@ -1392,7 +1455,7 @@ export default function ClosetMeChatApp() {
         : i
     );
     setWardrobe(updated);
-    await saveWardrobe(updated);
+    await saveWardrobe(updated, activeProfileId);
     if (weather) executeRecommendation(weather, events, profile, updated, recentWornIds);
   };
 
@@ -1401,7 +1464,7 @@ export default function ClosetMeChatApp() {
     const target = wardrobe.find((i) => i.id === itemId);
     const updated = wardrobe.filter((i) => i.id !== itemId);
     setWardrobe(updated);
-    await saveWardrobe(updated);
+    await saveWardrobe(updated, activeProfileId);
     setSelectedItemDetail(null);
 
     const time = getNowTime();
@@ -1426,16 +1489,17 @@ export default function ClosetMeChatApp() {
 
   // デモ服へのリセット
   const handleResetToDemo = async () => {
-    await clearSavedWardrobe();
+    await clearSavedWardrobe(activeProfileId);
     const ctx = await fetchDemoContext();
-    setWardrobe(ctx.wardrobe);
+    const resetWardrobe = demoWardrobeForProfile(ctx.wardrobe, activeClosetProfile);
+    setWardrobe(resetWardrobe);
 
     const time = getNowTime();
     const resetMsg: ChatMessage = {
       id: `ast_${Date.now()}`,
       sender: "assistant",
       timestamp: time,
-      text: "クローゼットを初期のデモデータ（12着）にリセットしました。",
+      text: `「${activeClosetProfile.name}」のクローゼットを初期デモデータ（${resetWardrobe.length}着）にリセットしました。`,
     };
     setMessages((prev) => [...prev, resetMsg]);
 
@@ -1444,7 +1508,7 @@ export default function ClosetMeChatApp() {
         weather,
         events,
         profile,
-        ctx.wardrobe,
+        resetWardrobe,
         [],
         "初期デモデータでコーディネートを再計算しました！"
       );
@@ -1455,7 +1519,7 @@ export default function ClosetMeChatApp() {
   const handleManualAddClothing = async (item: ClothingItem) => {
     const updated = [item, ...wardrobe];
     setWardrobe(updated);
-    await saveWardrobe(updated);
+    await saveWardrobe(updated, activeProfileId);
 
     const time = getNowTime();
     const addedMsg: ChatMessage = {
@@ -1478,6 +1542,83 @@ export default function ClosetMeChatApp() {
     }
   };
 
+  const handleSaveClosetProfile = (updatedProfile: ClosetProfile) => {
+    const updatedProfiles = profiles.map((item) => item.id === updatedProfile.id ? updatedProfile : item);
+    setProfiles(updatedProfiles);
+    setProfile(updatedProfile);
+    saveProfiles(updatedProfiles);
+    if (weather) executeRecommendation(weather, events, updatedProfile, wardrobe, recentWornIds);
+  };
+
+  const handleSwitchProfile = async (profileId: string) => {
+    if (profileId === activeProfileId) return;
+    await saveWardrobe(wardrobe, activeProfileId);
+    const target = profiles.find((item) => item.id === profileId);
+    if (!target) return;
+
+    const saved = await loadSavedWardrobe(profileId);
+    let targetWardrobe = saved;
+    if (!targetWardrobe || targetWardrobe.length === 0) {
+      const ctx = await fetchDemoContext();
+      targetWardrobe = demoWardrobeForProfile(ctx.wardrobe, target);
+    } else {
+      const ctx = await fetchDemoContext();
+      targetWardrobe = refreshDemoProductImages(targetWardrobe, ctx.wardrobe);
+    }
+
+    setActiveProfileId(profileId);
+    saveActiveProfileId(profileId);
+    setProfile(target);
+    setWardrobe(targetWardrobe);
+    setRecentWornIds([]);
+    setLatestOutfits([]);
+    setFeedbackSubmittedRank(null);
+    setMessages([{
+      id: `ast_profile_${Date.now()}`,
+      sender: "assistant",
+      timestamp: getNowTime(),
+      text: `「${target.name}」に切り替えました。専用クローゼット（${targetWardrobe.length}着）と体感学習を読み込みました。`,
+    }]);
+    if (weather) {
+      await executeRecommendation(weather, events, target, targetWardrobe, []);
+    }
+  };
+
+  const handleCreateProfile = async (newProfile: ClosetProfile) => {
+    const updatedProfiles = [...profiles, newProfile];
+    setProfiles(updatedProfiles);
+    saveProfiles(updatedProfiles);
+    await saveWardrobe(wardrobe, activeProfileId);
+
+    const ctx = await fetchDemoContext();
+    const initialWardrobe = demoWardrobeForProfile(ctx.wardrobe, newProfile);
+    setActiveProfileId(newProfile.id);
+    saveActiveProfileId(newProfile.id);
+    setProfile(newProfile);
+    setWardrobe(initialWardrobe);
+    setRecentWornIds([]);
+  };
+
+  const handleDeleteProfile = async (profileId: string) => {
+    if (profiles.length <= 1 || !window.confirm("このプロフィールと専用クローゼットを削除しますか？")) return;
+    const remaining = profiles.filter((item) => item.id !== profileId);
+    await clearSavedWardrobe(profileId);
+    setProfiles(remaining);
+    saveProfiles(remaining);
+    setIsProfileModalOpen(false);
+    if (profileId === activeProfileId) {
+      const nextProfile = remaining[0];
+      const saved = await loadSavedWardrobe(nextProfile.id);
+      const ctx = saved ? null : await fetchDemoContext();
+      const nextWardrobe = saved || demoWardrobeForProfile(ctx?.wardrobe || [], nextProfile);
+      setActiveProfileId(nextProfile.id);
+      saveActiveProfileId(nextProfile.id);
+      setProfile(nextProfile);
+      setWardrobe(nextWardrobe);
+      setRecentWornIds([]);
+    }
+  };
+
   const utilizationRate = useMemo(() => {
     if (wardrobe.length === 0) return 0;
     const dormant = wardrobe.filter((i) => i.days_since_last_worn >= 30).length;
@@ -1485,9 +1626,9 @@ export default function ClosetMeChatApp() {
   }, [wardrobe]);
 
   return (
-    <div className="flex flex-col min-h-screen bg-[#FAF9F6] text-zinc-900 font-sans selection:bg-zinc-900 selection:text-white">
+    <div className="chouchou-shell flex min-h-screen flex-col text-[#44383d] font-sans">
       {/* Top Header: 洗練された2段構成（1段目: ブランド&主要指標 / 2段目: 統合インテリジェントバー） */}
-      <header className="sticky top-0 z-30 border-b border-zinc-200/70 bg-white/90 backdrop-blur-md transition-all">
+      <header className="chouchou-header sticky top-0 z-30 border-b backdrop-blur-xl transition-all">
         {/* メインバー */}
         <div className="mx-auto flex max-w-4xl items-center justify-between px-3 py-2 sm:px-4 sm:py-2.5">
           {/* Logo */}
@@ -1510,6 +1651,14 @@ export default function ClosetMeChatApp() {
 
           {/* クイックステータス & アクション */}
           <div className="flex items-center gap-1.5 sm:gap-2">
+            <button
+              onClick={() => setIsProfileModalOpen(true)}
+              className="flex items-center gap-1.5 rounded-full border border-[#e8ccd7] bg-[#fff7fa] px-2.5 py-1 text-xs font-bold text-[#82596a] shadow-sm transition hover:bg-[#f9e8ee]"
+              title="マイページ・プロフィール切り替え"
+            >
+              <UserRound className="h-3.5 w-3.5" />
+              <span className="hidden max-w-[76px] truncate sm:inline">{activeClosetProfile?.name || "マイページ"}</span>
+            </button>
             {/* 稼働率 */}
             <button
               onClick={() => handleOpenWardrobeInChat()}
@@ -1676,6 +1825,18 @@ export default function ClosetMeChatApp() {
       />
 
       {/* 場所・気象設定モーダル */}
+      <ProfileModal
+        isOpen={isProfileModalOpen}
+        profiles={profiles}
+        activeProfileId={activeProfileId}
+        onClose={() => setIsProfileModalOpen(false)}
+        onSave={handleSaveClosetProfile}
+        onCreate={handleCreateProfile}
+        onSwitch={handleSwitchProfile}
+        onDelete={handleDeleteProfile}
+      />
+
+      {/* 場所・気象設定モーダル */}
       <LocationWeatherModal
         isOpen={isLocationModalOpen}
         onClose={() => setIsLocationModalOpen(false)}
@@ -1691,7 +1852,7 @@ export default function ClosetMeChatApp() {
         onSetHomeLocation={handleSetHomeLocation}
         onSensitivityChange={(delta) => {
           const nextProf = { ...profile, cold_sensitivity: delta };
-          setProfile(nextProf);
+          applyProfileUpdate(nextProf);
           if (weather) executeRecommendation(weather, events, nextProf, wardrobe, recentWornIds);
         }}
       />
